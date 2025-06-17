@@ -7,7 +7,7 @@ Database actions for documents in WordWise.
 "use server"
 
 import { db } from "@/db/db"
-import { documentsTable, type Document, type NewDocument } from "@/db/schema"
+import { documentsTable, documentVersionsTable, type Document, type NewDocument } from "@/db/schema"
 import { eq, desc, and } from "drizzle-orm"
 import { auth } from "@clerk/nextjs/server"
 import type { ActionState } from "@/types/server-action-types"
@@ -28,18 +28,33 @@ export async function createDocumentAction(
 
     const userUuid = clerkUserIdToUuid(userId)
 
-    const [newDocument] = await db
-      .insert(documentsTable)
-      .values({
-        ...document,
-        userId: userUuid
-      })
-      .returning()
+    // Create document and initial version in a transaction
+    const result = await db.transaction(async (tx) => {
+      // Create the document
+      const [newDocument] = await tx
+        .insert(documentsTable)
+        .values({
+          ...document,
+          userId: userUuid
+        })
+        .returning()
+
+      // Create the initial document version (version 1)
+      await tx
+        .insert(documentVersionsTable)
+        .values({
+          documentId: newDocument.id,
+          versionNumber: 1,
+          textSnapshot: document.rawText || ""
+        })
+
+      return newDocument
+    })
 
     return {
       isSuccess: true,
       message: "Document created successfully",
-      data: newDocument
+      data: result
     }
   } catch (error) {
     console.error("Error creating document:", error)
@@ -148,26 +163,42 @@ export async function updateDocumentAction(
       updatedAt: new Date()
     }
 
-    const [updatedDocument] = await db
-      .update(documentsTable)
-      .set(updateData)
-      .where(and(
-        eq(documentsTable.id, documentId),
-        eq(documentsTable.userId, userUuid)
-      ))
-      .returning()
+    // Update document and document version in a transaction
+    const result = await db.transaction(async (tx) => {
+      // Update the document
+      const [updatedDocument] = await tx
+        .update(documentsTable)
+        .set(updateData)
+        .where(and(
+          eq(documentsTable.id, documentId),
+          eq(documentsTable.userId, userUuid)
+        ))
+        .returning()
 
-    if (!updatedDocument) {
-      return {
-        isSuccess: false,
-        message: "Document not found"
+      if (!updatedDocument) {
+        throw new Error("Document not found")
       }
-    }
+
+      // Update the document version snapshot if rawText was updated
+      if (updates.rawText !== undefined) {
+        await tx
+          .update(documentVersionsTable)
+          .set({
+            textSnapshot: updates.rawText
+          })
+          .where(and(
+            eq(documentVersionsTable.documentId, documentId),
+            eq(documentVersionsTable.versionNumber, 1)
+          ))
+      }
+
+      return updatedDocument
+    })
 
     return {
       isSuccess: true,
       message: "Document updated successfully",
-      data: updatedDocument
+      data: result
     }
   } catch (error) {
     console.error("Error updating document:", error)

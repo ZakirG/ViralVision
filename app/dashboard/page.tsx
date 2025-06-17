@@ -23,11 +23,11 @@ import { useRouter } from "next/navigation"
 import { useUser, UserButton } from "@clerk/nextjs"
 import {
   getDocumentsByUserIdAction,
-  createDocumentAction,
   deleteDocumentAction
 } from "@/actions/db/documents-actions"
 import type { Document } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
+import { NewDocumentModal } from "@/components/new-document-modal"
 
 export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -74,33 +74,9 @@ export default function Dashboard() {
     }
   }
 
-  const handleCreateDocument = async () => {
-    try {
-      const result = await createDocumentAction({
-        title: "Untitled Document",
-        rawText: ""
-      })
-
-      if (result.isSuccess && result.data) {
-        toast({
-          title: "Success",
-          description: "Document created successfully"
-        })
-        router.push(`/editor?doc=${result.data.id}`)
-      } else {
-        toast({
-          title: "Error",
-          description: result.message,
-          variant: "destructive"
-        })
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create document",
-        variant: "destructive"
-      })
-    }
+  const handleDocumentCreated = (documentId: string) => {
+    router.push(`/editor?doc=${documentId}`)
+    loadDocuments() // Refresh the documents list
   }
 
   const handleDeleteDocument = async (docId: string, e: React.MouseEvent) => {
@@ -255,13 +231,7 @@ export default function Dashboard() {
 
           {/* Action buttons */}
           <div className="mb-6 flex flex-col gap-4 sm:flex-row">
-            <Button
-              className="gap-2 bg-teal-600 hover:bg-teal-700"
-              onClick={handleCreateDocument}
-            >
-              <Plus className="size-4" />
-              New document
-            </Button>
+            <NewDocumentModal onDocumentCreated={handleDocumentCreated} />
             <Button variant="outline" className="gap-2">
               <Upload className="size-4" />
               Upload file
@@ -294,13 +264,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <p className="mb-4 text-gray-600">No documents yet</p>
-                <Button
-                  className="gap-2 bg-teal-600 hover:bg-teal-700"
-                  onClick={handleCreateDocument}
-                >
-                  <Plus className="size-4" />
-                  Create your first document
-                </Button>
+                <NewDocumentModal onDocumentCreated={handleDocumentCreated} />
               </div>
             </div>
           ) : (
@@ -335,6 +299,11 @@ export default function Dashboard() {
                         {doc.contentType && (
                           <Badge variant="secondary" className="text-xs">
                             {doc.contentType}
+                          </Badge>
+                        )}
+                        {doc.audienceLevel && (
+                          <Badge variant="secondary" className="text-xs">
+                            {doc.audienceLevel}
                           </Badge>
                         )}
                       </div>

@@ -32,13 +32,20 @@ import {
 import { ContentGoalsModal } from "./components/content-goals-modal"
 import { PerformanceModal } from "./components/performance-modal"
 import { FloatingSidebar } from "./components/floating-sidebar"
+import { SuggestionPanel } from "./components/suggestion-panel"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
 import {
   getDocumentByIdAction,
   updateDocumentAction
 } from "@/actions/db/documents-actions"
-import type { Document } from "@/db/schema"
+import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
+import { 
+  logSuggestionAcceptedAction, 
+  logSuggestionRejectedAction,
+  logGrammarCheckAction 
+} from "@/actions/analytics-actions"
+import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 
 interface FormatState {
@@ -73,6 +80,10 @@ export default function GrammarlyEditor() {
   const [document, setDocument] = useState<Document | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [selectedSuggestionForPanel, setSelectedSuggestionForPanel] = useState<Suggestion | null>(null)
+  const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
+  const [rejectedSuggestionIds, setRejectedSuggestionIds] = useState<Set<string>>(new Set())
+  const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -81,21 +92,7 @@ export default function GrammarlyEditor() {
 
   const documentId = searchParams.get("doc")
 
-  // Load document on mount
-  useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      router.push("/")
-      return
-    }
-
-    if (isSignedIn && documentId) {
-      loadDocument()
-    } else if (isSignedIn && !documentId) {
-      router.push("/dashboard")
-    }
-  }, [isLoaded, isSignedIn, documentId, router])
-
-  const loadDocument = async () => {
+  const loadDocument = useCallback(async () => {
     if (!documentId) return
 
     try {
@@ -124,7 +121,21 @@ export default function GrammarlyEditor() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [documentId, router])
+
+  // Load document on mount
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.push("/")
+      return
+    }
+
+    if (isSignedIn && documentId) {
+      loadDocument()
+    } else if (isSignedIn && !documentId) {
+      router.push("/dashboard")
+    }
+  }, [isLoaded, isSignedIn, documentId, router, loadDocument])
 
   const saveDocument = useCallback(async () => {
     if (!document || !documentId || saving) return
@@ -205,7 +216,150 @@ export default function GrammarlyEditor() {
     return () => window.document.removeEventListener("keydown", handleKeyDown)
   }, [handleSave])
 
-  // Show loading state
+  // ALL useCallback functions must be defined before any early returns
+  
+  // Formatting functions
+  const handleBold = useCallback(() => {
+    editorRef.current?.formatText("bold")
+  }, [])
+
+  const handleItalic = useCallback(() => {
+    editorRef.current?.formatText("italic")
+  }, [])
+
+  const handleUnderline = useCallback(() => {
+    editorRef.current?.formatText("underline")
+  }, [])
+
+  const handleBulletList = useCallback(() => {
+    editorRef.current?.toggleBulletList()
+  }, [])
+
+  const handleNumberedList = useCallback(() => {
+    editorRef.current?.toggleNumberedList()
+  }, [])
+
+  // Content handling functions
+  const handleContentChange = useCallback((newContent: string) => {
+    setDocumentContent(newContent)
+  }, [])
+
+  const handleFormatStateChange = useCallback((newFormatState: FormatState) => {
+    setFormatState(newFormatState)
+  }, [])
+
+  const handleSelectionChange = useCallback(() => {
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      setCursorPosition(range.startOffset)
+    }
+  }, [])
+
+  // Suggestion handling functions
+  const handleSuggestionClick = useCallback((suggestion: Suggestion) => {
+    setSelectedSuggestionForPanel(suggestion)
+    setSuggestionPanelOpen(true)
+  }, [])
+
+  const refreshSuggestions = useCallback(async () => {
+    if (!documentId) return
+    
+    try {
+      const result = await getSuggestionsByDocumentIdAction(documentId, 1)
+      if (result.isSuccess && result.data) {
+        // Filter out accepted and rejected suggestions
+        const filteredSuggestions = result.data.filter(s => 
+          !s.accepted && !rejectedSuggestionIds.has(s.id)
+        )
+        setRealSuggestions(filteredSuggestions)
+      }
+    } catch (error) {
+      console.error("Error refreshing suggestions:", error)
+    }
+  }, [documentId, rejectedSuggestionIds])
+
+  const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
+    if (!suggestion.startOffset || !suggestion.endOffset || !suggestion.suggestedText) {
+      toast({
+        title: "Error",
+        description: "Unable to apply suggestion - missing required data",
+        variant: "destructive"
+      })
+      return
+    }
+
+    const beforeText = documentContent.substring(0, suggestion.startOffset)
+    const afterText = documentContent.substring(suggestion.endOffset)
+    const newContent = beforeText + suggestion.suggestedText + afterText
+    
+    setDocumentContent(newContent)
+    
+    if (documentId) {
+      try {
+        await logSuggestionAcceptedAction(
+          suggestion.id,
+          suggestion.suggestionType || 'unknown',
+          documentId
+        )
+      } catch (error) {
+        console.error("Failed to log suggestion accepted event:", error)
+      }
+    }
+    
+    // Remove the accepted suggestion from the list immediately
+    setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+    
+    setTimeout(() => {
+      refreshSuggestions()
+    }, 500)
+    
+    console.log("Applied suggestion:", {
+      before: documentContent.substring(suggestion.startOffset, suggestion.endOffset),
+      after: suggestion.suggestedText,
+      newContent
+    })
+  }, [documentContent, documentId, refreshSuggestions])
+
+  const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
+    setRejectedSuggestionIds(prev => new Set([...prev, suggestion.id]))
+    
+    // Remove the rejected suggestion from the list immediately
+    setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+    
+    if (documentId) {
+      try {
+        await logSuggestionRejectedAction(
+          suggestion.id,
+          suggestion.suggestionType || 'unknown',
+          documentId
+        )
+      } catch (error) {
+        console.error("Failed to log suggestion rejected event:", error)
+      }
+    }
+    
+    console.log("Rejected suggestion:", suggestion.id)
+    
+    toast({
+      title: "Suggestion Dismissed",
+      description: "The suggestion has been hidden and won't appear again."
+    })
+  }, [documentId])
+
+  const closeSuggestionPanel = useCallback(() => {
+    setSuggestionPanelOpen(false)
+    setSelectedSuggestionForPanel(null)
+  }, [])
+
+  // Fetch suggestions when document loads or rejected suggestions change
+  useEffect(() => {
+    if (documentId && document) {
+      refreshSuggestions()
+    }
+  }, [documentId, document, refreshSuggestions])
+
+  // Show loading state - this early return is now AFTER all hooks
   if (loading || !isLoaded) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -224,44 +378,8 @@ export default function GrammarlyEditor() {
     return null
   }
 
-  const suggestions = [
-    {
-      id: 1,
-      type: "correctness",
-      title: "Capitalize the word",
-      word: "hi",
-      description: "Correctness • Change the capitalization",
-      preview: "hi I'm I'm over here chillin...",
-      isPro: false
-    },
-    {
-      id: 2,
-      type: "correctness",
-      title: "Correct your spelling",
-      word: "chillin",
-      description: "Spelling error",
-      preview: "chilling",
-      isPro: false
-    },
-    {
-      id: 3,
-      type: "correctness",
-      title: "Capitalize the word",
-      word: "you",
-      description: "Capitalization",
-      preview: "You",
-      isPro: false
-    },
-    {
-      id: 4,
-      type: "correctness",
-      title: "Correct your spelling",
-      word: "dooooo",
-      description: "Spelling error",
-      preview: "do",
-      isPro: false
-    }
-  ]
+  // Use real suggestions from database instead of mock data
+  const suggestions = realSuggestions
 
   const tabs = [
     { id: "correctness", label: "Correctness", color: "bg-red-500", score: 85 },
@@ -269,46 +387,6 @@ export default function GrammarlyEditor() {
     { id: "engagement", label: "Engagement", color: "bg-green-500", score: 90 },
     { id: "structure", label: "Structure", color: "bg-purple-500", score: 68 }
   ]
-
-  // Formatting functions
-  const handleBold = () => {
-    editorRef.current?.formatText("bold")
-  }
-
-  const handleItalic = () => {
-    editorRef.current?.formatText("italic")
-  }
-
-  const handleUnderline = () => {
-    editorRef.current?.formatText("underline")
-  }
-
-  const handleBulletList = () => {
-    editorRef.current?.toggleBulletList()
-  }
-
-  const handleNumberedList = () => {
-    editorRef.current?.toggleNumberedList()
-  }
-
-  // Add this function to handle text changes
-  const handleContentChange = (newContent: string) => {
-    setDocumentContent(newContent)
-  }
-
-  // Add this function to handle format state changes
-  const handleFormatStateChange = (newFormatState: FormatState) => {
-    setFormatState(newFormatState)
-  }
-
-  // Add this function to handle cursor position
-  const handleSelectionChange = () => {
-    const selection = window.getSelection()
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0)
-      setCursorPosition(range.startOffset)
-    }
-  }
 
   // Add this style tag before the return statement
   const editorStyles = `
@@ -429,6 +507,9 @@ export default function GrammarlyEditor() {
                 initialContent={documentContent}
                 onContentChange={handleContentChange}
                 onFormatStateChange={handleFormatStateChange}
+                documentId={documentId || undefined}
+                onSuggestionClick={handleSuggestionClick}
+                rejectedSuggestionIds={rejectedSuggestionIds}
               />
             </div>
           </div>
@@ -612,7 +693,7 @@ export default function GrammarlyEditor() {
             <div className="mt-8 flex flex-col items-center space-y-3">
               <div className="flex flex-col items-center">
                 <div className="mb-1 flex size-6 items-center justify-center rounded-full bg-gray-500">
-                  <span className="text-xs font-medium text-white">11</span>
+                  <span className="text-xs font-medium text-white">{suggestions.length}</span>
                 </div>
                 <span className="w-16 origin-center -rotate-90 text-center text-xs leading-tight text-gray-600">
                   SUGGESTIONS
@@ -690,7 +771,7 @@ export default function GrammarlyEditor() {
                     </h2>
                     <div className="flex size-6 items-center justify-center rounded-full bg-gray-100">
                       <span className="text-xs font-medium text-gray-600">
-                        6
+                        {suggestions.length}
                       </span>
                     </div>
                   </div>
@@ -715,55 +796,79 @@ export default function GrammarlyEditor() {
 
                 {/* Suggestions list */}
                 <div className="flex-1 overflow-y-auto">
-                  {suggestions.map(suggestion => (
-                    <div
-                      key={suggestion.id}
-                      className="border-b border-gray-100 last:border-b-0"
-                    >
-                      <div className="p-4 hover:bg-gray-50">
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-red-100">
-                            <div className="size-2 rounded-full bg-red-500"></div>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="mb-1 break-words text-sm font-medium text-gray-900">
-                              {suggestion.title}
-                            </div>
-                            <div className="mb-1 break-words text-sm font-medium text-gray-700">
-                              {suggestion.word}
-                            </div>
-                            {suggestion.id === 1 && (
-                              <div className="mb-3">
+                  {suggestions.length === 0 ? (
+                    <div className="flex items-center justify-center p-8">
+                      <div className="text-center">
+                        <div className="mb-2 text-gray-500">No suggestions found</div>
+                        <div className="text-sm text-gray-400">Start typing to get grammar and spelling suggestions</div>
+                      </div>
+                    </div>
+                  ) : (
+                    suggestions.map(suggestion => {
+                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100';
+                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-blue-500';
+                      const suggestionLabel = suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar';
+                      
+                      return (
+                        <div
+                          key={suggestion.id}
+                          className="border-b border-gray-100 last:border-b-0 cursor-pointer"
+                          onClick={() => handleSuggestionClick(suggestion)}
+                        >
+                          <div className="p-4 hover:bg-gray-50">
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${suggestionTypeColor}`}>
+                                <div className={`size-2 rounded-full ${suggestionDotColor}`}></div>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-1 break-words text-sm font-medium text-gray-900">
+                                  {suggestionLabel} suggestion
+                                </div>
+                                {suggestion.suggestedText && (
+                                  <div className="mb-1 break-words text-sm font-medium text-green-700">
+                                    "{suggestion.suggestedText}"
+                                  </div>
+                                )}
                                 <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
                                   <span className="break-words">
-                                    {suggestion.description}
+                                    {suggestion.explanation || 'Click to see details'}
                                   </span>
                                   <Info className="size-3 shrink-0" />
                                 </div>
-                                <div className="mb-3 break-words text-sm text-gray-700">
-                                  {suggestion.preview}
-                                </div>
+                                {suggestion.confidence && (
+                                  <div className="mb-2 text-xs text-gray-500">
+                                    Confidence: {Math.round(parseFloat(suggestion.confidence) * 100)}%
+                                  </div>
+                                )}
                                 <div className="flex flex-wrap gap-2">
                                   <Button
                                     size="sm"
                                     className="bg-teal-600 hover:bg-teal-700"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSuggestionAccept(suggestion);
+                                    }}
                                   >
                                     Accept
                                   </Button>
-                                  <Button size="sm" variant="outline">
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSuggestionReject(suggestion);
+                                    }}
+                                  >
                                     Dismiss
-                                  </Button>
-                                  <Button variant="ghost" size="icon">
-                                    <MoreHorizontal className="size-4" />
                                   </Button>
                                 </div>
                               </div>
-                            )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -924,6 +1029,15 @@ export default function GrammarlyEditor() {
         open={performanceModalOpen}
         onOpenChange={setPerformanceModalOpen}
         documentContent={documentContent}
+      />
+
+      {/* Suggestion Panel */}
+      <SuggestionPanel
+        suggestion={selectedSuggestionForPanel}
+        isOpen={suggestionPanelOpen}
+        onClose={closeSuggestionPanel}
+        onAccept={handleSuggestionAccept}
+        onReject={handleSuggestionReject}
       />
     </div>
   )

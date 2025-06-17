@@ -100,7 +100,7 @@ async function setCachedResponse(text: string, response: LanguageToolResponse): 
   }
 }
 
-export async function checkGrammarWithLanguageToolAction(
+export async function checkGrammarOnlyWithLanguageToolAction(
   text: string,
   documentId: string
 ): Promise<ActionState<Suggestion[]>> {
@@ -216,8 +216,8 @@ export async function checkGrammarWithLanguageToolAction(
     const userUuid = clerkUserIdToUuid(userId)
     console.log("🔧 User UUID:", userUuid)
     
-    // Get existing suggestions to check what needs to be updated vs created
-    console.log("🔧 Fetching existing suggestions for smart merge...")
+    // Get existing grammar suggestions only (not spelling)
+    console.log("🔧 Fetching existing grammar suggestions for smart merge...")
     const existingSuggestions = await db
       .select()
       .from(suggestionsTable)
@@ -226,7 +226,8 @@ export async function checkGrammarWithLanguageToolAction(
           eq(suggestionsTable.documentId, documentId),
           eq(suggestionsTable.versionNumber, 1),
           eq(suggestionsTable.accepted, false),
-          eq(suggestionsTable.dismissed, false)
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.suggestionType, 'grammar')
         )
       )
     
@@ -237,9 +238,17 @@ export async function checkGrammarWithLanguageToolAction(
     let suggestionsCreated = 0
     let suggestionsUpdated = 0
 
-    // Store suggestions in database
-    console.log("🔧 Processing", languageToolResponse.matches.length, "matches...")
-    for (const match of languageToolResponse.matches) {
+    // Process only grammar matches (exclude spelling/typos)
+    const grammarMatches = languageToolResponse.matches.filter(match => 
+      // Exclude spelling/typo matches - only real grammar issues
+      !(match.rule.category.id === 'TYPOS' || 
+        match.type.typeName === 'UnknownWord' ||
+        (match.type.typeName === 'Other' && match.rule.category.name === 'Possible Typo'))
+    )
+    
+    console.log("🔧 Processing", grammarMatches.length, "grammar matches out of", languageToolResponse.matches.length, "total matches")
+    console.log("🔧 GRAMMAR FILTER DEBUG: Found these as grammar:", grammarMatches.map(m => m.type.typeName))
+    for (const match of grammarMatches) {
       console.log("🔧 BASIC: Starting to process match:", match.offset, match.length)
       try {
         // Validate match structure
@@ -255,6 +264,8 @@ export async function checkGrammarWithLanguageToolAction(
         // Extract the original text from the document that this suggestion is for
         const originalText = text.substring(match.offset, match.offset + match.length)
         const suggestedText = match.replacements && match.replacements[0] ? match.replacements[0].value : null
+
+        // Categorization logic updated based on LanguageTool response analysis
         
         
         // DEBUG: Let's see all dismissed suggestions for this document first
@@ -334,7 +345,7 @@ export async function checkGrammarWithLanguageToolAction(
           continue
         }
 
-        const suggestionType = match.type.typeName.toLowerCase().includes('spell') ? 'spelling' : 'grammar'
+        const suggestionType = 'grammar' // Only processing grammar in this function
         
         // Check if an existing suggestion matches this match (same position and content)
         const matchingExistingSuggestion = existingSuggestions.find(existing => 
@@ -417,7 +428,7 @@ export async function checkGrammarWithLanguageToolAction(
       console.log("🔧 No obsolete suggestions to remove")
     }
 
-    console.log(`🔧 Smart merge complete: ${suggestionsCreated} created, ${suggestionsUpdated} updated, ${suggestionsDeleted} deleted, ${validExistingSuggestionIds.size} preserved`)
+    console.log(`🔧 Grammar check complete: ${suggestionsCreated} created, ${suggestionsUpdated} updated, ${suggestionsDeleted} deleted, ${validExistingSuggestionIds.size} preserved`)
 
     // Log analytics event for grammar check
     
@@ -428,9 +439,9 @@ export async function checkGrammarWithLanguageToolAction(
       // console.error("🔧 Failed to log grammar check analytics:", error)
     }
 
-    // Fetch the suggestions we just created to return them
+    // Fetch only grammar suggestions
     
-    const createdSuggestions = await db
+    const grammarSuggestions = await db
       .select()
       .from(suggestionsTable)
       .where(
@@ -438,22 +449,291 @@ export async function checkGrammarWithLanguageToolAction(
           eq(suggestionsTable.documentId, documentId),
           eq(suggestionsTable.versionNumber, 1),
           eq(suggestionsTable.accepted, false),
-          eq(suggestionsTable.dismissed, false)  // Don't return dismissed suggestions
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.suggestionType, 'grammar')
         )
       )
 
     
     return {
       isSuccess: true,
-      message: `Grammar check completed. ${suggestionsCreated} suggestions found.`,
-      data: createdSuggestions
+      message: `Grammar check completed. ${suggestionsCreated} grammar suggestions found.`,
+      data: grammarSuggestions
     }
 
-  } catch (error) {
+    } catch (error) {
     
     return {
       isSuccess: false,
       message: "Failed to check grammar"
+    }
+  }
+}
+
+// Backward compatibility function that combines both spell and grammar checking
+export async function checkGrammarWithLanguageToolAction(
+  text: string,
+  documentId: string
+): Promise<ActionState<Suggestion[]>> {
+  try {
+    console.log("🔧🔤 Running combined spell + grammar check...")
+    
+    // Run both spell and grammar checks
+    const [spellResult, grammarResult] = await Promise.all([
+      checkSpellingWithLanguageToolAction(text, documentId),
+      checkGrammarOnlyWithLanguageToolAction(text, documentId)
+    ])
+
+    // Check if both were successful
+    if (!spellResult.isSuccess || !grammarResult.isSuccess) {
+      return {
+        isSuccess: false,
+        message: `Failed to complete checks. Spell: ${spellResult.message}, Grammar: ${grammarResult.message}`
+      }
+    }
+
+    // Combine the results
+    const combinedSuggestions = [
+      ...(spellResult.data || []),
+      ...(grammarResult.data || [])
+    ]
+
+    const totalSpelling = spellResult.data?.length || 0
+    const totalGrammar = grammarResult.data?.length || 0
+
+    return {
+      isSuccess: true,
+      message: `Combined check completed. ${totalSpelling} spelling + ${totalGrammar} grammar suggestions found.`,
+      data: combinedSuggestions
+    }
+  } catch (error) {
+    console.error("Combined spell+grammar check error:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to check spelling and grammar"
+    }
+  }
+}
+
+export async function checkSpellingWithLanguageToolAction(
+  text: string,
+  documentId: string,
+  wordStartOffset?: number,
+  wordEndOffset?: number
+): Promise<ActionState<Suggestion[]>> {
+  try {
+    console.log("🔤 checkSpellingWithLanguageToolAction starting - text length:", text.length, "wordOffset:", wordStartOffset, "-", wordEndOffset)
+    
+    const { userId } = await auth()
+    if (!userId) {
+      return {
+        isSuccess: false,
+        message: "User not authenticated"
+      }
+    }
+
+    if (!text.trim()) {
+      return {
+        isSuccess: true,
+        message: "No text to check",
+        data: []
+      }
+    }
+
+    // For spell checking, we can be more aggressive about using cache since spelling is more stable
+    let languageToolResponse = await getCachedResponse(text)
+    
+    if (!languageToolResponse) {
+      console.log("🔤 Calling LanguageTool API for spell check...")
+      // Call LanguageTool API with spell-check optimized parameters
+      const response = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          text: text,
+          language: 'en-US',
+          enabledOnly: 'false',
+          // Optimize for spell checking - focus on spelling rules
+          disabledRules: 'WHITESPACE_RULE,EN_QUOTES,DASH_RULE,WORD_CONTAINS_UNDERSCORE'
+        })
+      })
+
+      if (!response.ok) {
+        return {
+          isSuccess: false,
+          message: `LanguageTool API error: ${response.status}`
+        }
+      }
+
+      const responseText = await response.text()
+      languageToolResponse = JSON.parse(responseText) as LanguageToolResponse
+      
+      // Cache the response
+      await setCachedResponse(text, languageToolResponse)
+    }
+
+    // Get existing spelling suggestions only
+    const existingSpellingSuggestions = await db
+      .select()
+      .from(suggestionsTable)
+      .where(
+        and(
+          eq(suggestionsTable.documentId, documentId),
+          eq(suggestionsTable.versionNumber, 1),
+          eq(suggestionsTable.accepted, false),
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.suggestionType, 'spelling')
+        )
+      )
+
+    console.log("🔤 Found", existingSpellingSuggestions.length, "existing spelling suggestions")
+
+    const validExistingSuggestionIds = new Set<string>()
+    let suggestionsCreated = 0
+    let suggestionsUpdated = 0
+
+    // Process spelling matches now that we know the correct categorization
+
+    // Process spelling matches (based on actual LanguageTool response structure)
+    const spellingMatches = languageToolResponse.matches.filter(match => 
+      // LanguageTool categorizes spelling errors as:
+      // - typeName: 'UnknownWord' (misspelled words)
+      // - typeName: 'Other' (capitalization, etc.) 
+      // - categoryId: 'TYPOS' (all typos/spelling issues)
+      match.rule.category.id === 'TYPOS' || 
+      match.type.typeName === 'UnknownWord' ||
+      (match.type.typeName === 'Other' && match.rule.category.name === 'Possible Typo')
+    )
+
+    console.log("🔤 Processing", spellingMatches.length, "spelling matches out of", languageToolResponse.matches.length, "total matches")
+    console.log("🔤 SPELLING FILTER DEBUG: Found these as spelling:", spellingMatches.map(m => m.type.typeName))
+
+    for (const match of spellingMatches) {
+      try {
+        const originalText = text.substring(match.offset, match.offset + match.length)
+        const suggestedText = match.replacements && match.replacements[0] ? match.replacements[0].value : null
+
+        // If word offsets are provided, only process spelling errors within that word range
+        if (wordStartOffset !== undefined && wordEndOffset !== undefined) {
+          const matchStart = match.offset
+          const matchEnd = match.offset + match.length
+          
+          // Skip if this spelling error is not within the specified word range
+          if (matchEnd < wordStartOffset || matchStart > wordEndOffset) {
+            console.log(`🔤 Skipping spelling error outside word range: ${matchStart}-${matchEnd} not in ${wordStartOffset}-${wordEndOffset}`)
+            continue
+          }
+        }
+
+        // Check for dismissed suggestions (simplified for spelling)
+        const existingDismissedSuggestion = await db
+          .select()
+          .from(suggestionsTable)
+          .where(
+            and(
+              eq(suggestionsTable.documentId, documentId),
+              eq(suggestionsTable.originalText, originalText),
+              eq(suggestionsTable.suggestedText, suggestedText || ''),
+              eq(suggestionsTable.dismissed, true),
+              eq(suggestionsTable.suggestionType, 'spelling')
+            )
+          )
+          .limit(1)
+
+        if (existingDismissedSuggestion.length > 0) {
+          continue
+        }
+
+        // Check if an existing spelling suggestion matches this match
+        const matchingExistingSuggestion = existingSpellingSuggestions.find(existing => 
+          existing.startOffset === match.offset &&
+          existing.endOffset === match.offset + match.length &&
+          existing.originalText === originalText &&
+          existing.suggestedText === suggestedText
+        )
+
+        if (matchingExistingSuggestion) {
+          validExistingSuggestionIds.add(matchingExistingSuggestion.id)
+          console.log(`🔤 PRESERVING existing spelling suggestion ${matchingExistingSuggestion.id}`)
+          
+          if (matchingExistingSuggestion.explanation !== match.message) {
+            await db
+              .update(suggestionsTable)
+              .set({ explanation: match.message })
+              .where(eq(suggestionsTable.id, matchingExistingSuggestion.id))
+            suggestionsUpdated++
+          }
+        } else {
+          // Create new spelling suggestion
+          await db
+            .insert(suggestionsTable)
+            .values({
+              documentId,
+              versionNumber: 1,
+              originalText: originalText,
+              suggestedText: suggestedText,
+              explanation: match.message,
+              startOffset: match.offset,
+              endOffset: match.offset + match.length,
+              suggestionType: 'spelling',
+              confidence: "0.9", // Higher confidence for spelling
+              accepted: false
+            })
+          
+          suggestionsCreated++
+          console.log(`🔤 CREATED new spelling suggestion ${suggestionsCreated}`)
+        }
+      } catch (error) {
+        console.error("Error storing spelling suggestion:", error)
+      }
+    }
+
+    // Clean up obsolete spelling suggestions only
+    const obsoleteSpellingSuggestionIds = existingSpellingSuggestions
+      .filter(existing => !validExistingSuggestionIds.has(existing.id))
+      .map(existing => existing.id)
+
+    let suggestionsDeleted = 0
+    for (const obsoleteSuggestionId of obsoleteSpellingSuggestionIds) {
+      try {
+        await db
+          .delete(suggestionsTable)
+          .where(eq(suggestionsTable.id, obsoleteSuggestionId))
+        suggestionsDeleted++
+      } catch (error) {
+        console.error(`🔤 Failed to delete obsolete spelling suggestion ${obsoleteSuggestionId}:`, error)
+      }
+    }
+
+    console.log(`🔤 Spell check complete: ${suggestionsCreated} created, ${suggestionsUpdated} updated, ${suggestionsDeleted} deleted, ${validExistingSuggestionIds.size} preserved`)
+
+    // Return only spelling suggestions
+    const spellingSuggestions = await db
+      .select()
+      .from(suggestionsTable)
+      .where(
+        and(
+          eq(suggestionsTable.documentId, documentId),
+          eq(suggestionsTable.versionNumber, 1),
+          eq(suggestionsTable.accepted, false),
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.suggestionType, 'spelling')
+        )
+      )
+
+    return {
+      isSuccess: true,
+      message: `Spell check completed. ${suggestionsCreated} spelling suggestions found.`,
+      data: spellingSuggestions
+    }
+
+  } catch (error) {
+    console.error("Spell check error:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to check spelling"
     }
   }
 } 

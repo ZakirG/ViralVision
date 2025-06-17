@@ -11,6 +11,7 @@ import {
   useMemo
 } from "react"
 import { checkGrammarWithLanguageToolAction } from "@/actions/languagetool-actions"
+import { checkSpellingWithLanguageToolAction, checkGrammarOnlyWithLanguageToolAction } from "@/actions/languagetool-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
 import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms } from "slate"
@@ -235,17 +236,40 @@ export const EditableContent = forwardRef<
     }
   }, [initialContent])
 
-  // Debounced grammar check function
-  const debouncedGrammarCheck = useCallback(
-    debounce(async (text: string, docId: string) => {
+  // Separate debounced functions for spell and grammar checking
+  const debouncedSpellCheck = useCallback(
+    debounce(async (text: string, docId: string, wordStart?: number, wordEnd?: number) => {
       try {
-        setIsCheckingGrammar(true)
+        console.log("🔤 SLATE: Running spell check...")
         
-        const result = await checkGrammarWithLanguageToolAction(text, docId)
+        const result = await checkSpellingWithLanguageToolAction(text, docId, wordStart, wordEnd)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
-          const newSuggestions = result.data as Suggestion[]
-          console.log("🔍 SLATE: Grammar check returned", newSuggestions.length, "suggestions, now re-fetching from DB")
+          console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
+          
+          // Re-sync with database to get updated suggestions
+          if (onSuggestionsUpdated) {
+            onSuggestionsUpdated()
+          }
+        }
+      } catch (error) {
+        console.error("❌ SLATE: Spell check error:", error)
+      }
+    }, 100), // Very short delay for spell checking - almost immediate
+    [onSuggestionsUpdated]
+  )
+
+  const debouncedSpellingCheckOnEdit = useCallback(
+    debounce(async (text: string, docId: string) => {
+      try {
+        setIsCheckingGrammar(true) // Keep this state name for now
+        console.log("🔤 SLATE: Running spell check on content change...")
+        
+        // Use the corrected spelling function
+        const result = await checkSpellingWithLanguageToolAction(text, docId)
+        
+        if (result.isSuccess && result.data && Array.isArray(result.data)) {
+          console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
           
           // Re-sync with database to ensure dismissed suggestions are properly filtered
           if (onSuggestionsUpdated) {
@@ -253,11 +277,11 @@ export const EditableContent = forwardRef<
           }
         }
       } catch (error) {
-        console.error("❌ SLATE: Grammar check error:", error)
+        console.error("❌ SLATE: Spell check error:", error)
       } finally {
         setIsCheckingGrammar(false)
       }
-    }, 1000),
+    }, 500), // Faster for spelling checks
     [onSuggestionsUpdated]
   )
 
@@ -265,22 +289,25 @@ export const EditableContent = forwardRef<
   const handleChange = useCallback((newValue: Descendant[]) => {
     setValue(newValue)
     
-    // Convert to text for grammar checking
+    // Convert to text for checking
     const plainText = slateToText(newValue)
     
     // Convert to HTML for saving (preserve formatting)
     const htmlContent = slateToHtml(newValue)
     
-    
     onContentChange(htmlContent)
     
-    // Trigger grammar check (but skip if accepting a suggestion to avoid race conditions)
-    if (documentId && plainText.trim() && !isAcceptingSuggestion) {
-      debouncedGrammarCheck(plainText, documentId)
-    } else if (isAcceptingSuggestion) {
-      console.log("🔄 SLATE: Skipping grammar check - currently accepting a suggestion")
+    // Skip all checks if accepting a suggestion to avoid race conditions
+    if (isAcceptingSuggestion) {
+      console.log("🔄 SLATE: Skipping all checks - currently accepting a suggestion")
+      return
     }
-  }, [onContentChange, documentId, debouncedGrammarCheck, isAcceptingSuggestion])
+    
+    // Trigger spell check on content changes (now using spelling function)
+    if (documentId && plainText.trim()) {
+      debouncedSpellingCheckOnEdit(plainText, documentId)
+    }
+  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, isAcceptingSuggestion])
 
   // Create decorations for suggestions
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -385,11 +412,25 @@ export const EditableContent = forwardRef<
     }
   }, [suggestions, onSuggestionClick])
 
-  // Handle keyboard shortcuts for formatting
+  // Handle keyboard events for formatting shortcuts and spell checking triggers
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    // Handle spacebar for spell checking
+    if (event.key === ' ' && documentId && !isAcceptingSuggestion) {
+      // Trigger spell check after a very short delay to let the space be processed
+      setTimeout(() => {
+        const currentText = slateToText(value)
+                  if (currentText.trim() && documentId) {
+            console.log("🔤 SLATE: Spacebar pressed, triggering spell check")
+            // Use the corrected spelling check function  
+            debouncedSpellCheck(currentText, documentId)
+          }
+      }, 50)
+    }
+    
+    // Handle formatting shortcuts
     if (!event.ctrlKey && !event.metaKey) {
-        return
-      }
+      return
+    }
       
     switch (event.key) {
       case 'b':
@@ -405,7 +446,7 @@ export const EditableContent = forwardRef<
         // Toggle underline (implement later)
         break
     }
-  }, [])
+  }, [documentId, isAcceptingSuggestion, value, debouncedSpellCheck])
 
   // Accept suggestion by replacing text in the editor
   const acceptSuggestion = useCallback((suggestion: Suggestion) => {

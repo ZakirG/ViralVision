@@ -331,29 +331,11 @@ export default function GrammarlyEditor() {
     }
 
     // Check if the suggestion is still in our current suggestions list
-    console.log("🎯 PARENT: Validating suggestion before accept:", {
+    // VALIDATION DISABLED FOR DEBUGGING
+    console.log("🎯 PARENT: Proceeding to accept suggestion (validation disabled for debugging):", {
       suggestionId: suggestion.id,
-      suggestionText: suggestion.suggestedText,
-      currentSuggestionsCount: realSuggestions.length,
-      currentSuggestionIds: realSuggestions.map(s => s.id),
-      currentSuggestionTexts: realSuggestions.map(s => s.suggestedText)
+      suggestionText: suggestion.suggestedText
     })
-    
-    const isStillValid = realSuggestions.some(s => s.id === suggestion.id)
-    if (!isStillValid) {
-      console.log("🎯 PARENT: Suggestion no longer valid (not in current list), BUT PROCEEDING ANYWAY FOR DEBUGGING")
-      console.log("🎯 PARENT: Attempted suggestion:", { id: suggestion.id, text: suggestion.suggestedText })
-      console.log("🎯 PARENT: Current suggestions:", realSuggestions.map(s => ({ id: s.id, text: s.suggestedText })))
-      
-      // TEMPORARILY DISABLED - let's see if the database action still works
-      // toast({
-      //   title: "Suggestion Outdated",
-      //   description: "This suggestion has been updated. Please try again with the latest suggestions.",
-      //   variant: "destructive"
-      // })
-      // refreshSuggestions()
-      // return
-    }
 
     console.log("🎯 PARENT: Accepting suggestion via editor:", {
       id: suggestion.id,
@@ -972,9 +954,9 @@ export default function GrammarlyEditor() {
                     </div>
                   ) : (
                     suggestions.map(suggestion => {
-                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100';
-                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-blue-500';
-                      const suggestionLabel = suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar';
+                      // All suggestions are now spelling suggestions (updated with new categorization)
+                      const suggestionTypeColor = 'bg-red-100';
+                      const suggestionDotColor = 'bg-red-500';
                       
                       return (
                         <div
@@ -988,9 +970,9 @@ export default function GrammarlyEditor() {
                                 <div className={`size-2 rounded-full ${suggestionDotColor}`}></div>
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="mb-1 break-words text-sm font-medium text-gray-900">
-                                  {suggestionLabel} suggestion
-                                </div>
+                                                              <div className="mb-1 break-words text-sm font-medium text-gray-900">
+                                Spelling suggestion
+                              </div>
                                 {suggestion.suggestedText && (
                                   <div className="mb-1 break-words text-sm font-medium text-green-700">
                                     "{suggestion.suggestedText}"

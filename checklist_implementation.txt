@@ -1,0 +1,94 @@
+✅ Feature Checklist
+🔐 Authentication & Onboarding
+	•	[✅] Users can sign up and log in using Clerk
+	•	[✅] User session is persisted across refresh with ClerkProvider
+	•	[✅] User profile data is saved to user_profile_settings in Supabase
+	•	[✅] Auth middleware enforces route protection and Supabase RLS via Clerk JWT
+📝 Documents & Editor
+	•	[🔄] Users can create, rename, and delete documents (create/delete ✅, need rename)
+	•	[✅] Documents are saved to the Supabase documents table
+	•	[⏸️] Document content is versioned and stored in document_versions (SKIPPED - using single version)
+	•	[✅] Users can select a content type (Education / Edutainment / Storytime / Ad)
+	•	[✅] Users can select an expected viewer audience (General / Knowledgeable / Expert)
+	•	[✅] Document title and metadata can be edited and persisted
+	•	[✅] Text editor supports typing, pasting, and placeholder messaging
+	•	[✅] Text changes are debounced and sent to grammar/spell checker
+	•	[✅] Suggestions are underlined in the editor in real time
+	•	[✅] Clicking on a suggestion opens a side panel with explanations and alternatives
+	•	[✅] Accepting a suggestion updates the text and marks it accepted in DB
+	•	[✅] Rejected suggestions are hidden and marked rejected in DB
+	•	[✅] Suggestions are saved to the suggestions table with offsets and type
+🧠 LanguageTool Integration (Grammar & Spell Check)
+	•	[✅] Call LanguageTool API via a server action
+	•	[✅] Grammar/spelling suggestions are retrieved from LanguageTool
+	•	[✅] Matches from LanguageTool are stored as suggestions
+	•	[🔄] Text is checked in chunks (e.g., per paragraph) (currently full text, could optimize)
+	•	[✅] Cache is used to avoid repeat analysis of identical text
+	•	[✅] Throttle LanguageTool calls on frontend, use debounce logic
+📊 Analytics & Events
+	•	[✅] Suggestion acceptance and rejection events are logged in analytics_events
+	•	[🔄] Feature usage events (hook generation, rewrites, etc.) are tracked (document creation, grammar checks ✅)
+	•	[✅] Analytics events are sent as fire-and-forget POSTs
+
+
+PRD:
+**Project Overview**
+Build a Grammarly-style AI assistant that helps short-form video creators (TikTok, Reels, Shorts) draft, polish, and deliver viral scripts that fit platform limits and brand voice.  An MVP will offer a real-time web editor, instant on-screen-text ideas, conversational rewrites, 30-second trims, delivery tips, and baseline spell/grammar checking—all powered by GPT-4o, LanguageTool, Next.js Server Actions, Supabase, and Clerk.
+
+---
+
+### User Roles & Core Workflows
+
+1. **Creator** – Signs up with Clerk → sets/edits brand rules → creates a document → receives AI suggestions → accepts/exports final script.
+2. **System** – Listens to text changes → runs LanguageTool for grammar/spell → invokes GPT-4o for creative actions → stores & streams suggestions to the editor.
+
+---
+
+### Technical Foundation
+
+#### Data Models (Supabase + Drizzle)
+
+* **users** — id, email, timestamps.
+* **user\_profile\_settings** — user\_id FK, brand\_voice\_rules, writing\_approach\_rules, default\_content\_type, default\_audience.
+* **documents** — id, user\_id FK, title, raw\_text, content\_type, audience\_level, status, timestamps.
+* **document\_versions** — id, document\_id FK, version\_number, text\_snapshot, created\_at.
+* **suggestions** — id, document\_id FK, version\_number, start\_offset, end\_offset, type (grammar | spelling | hook | onscreen\_text | rewrite | shorten | delivery), suggested\_text, explanation, confidence, accepted, created\_at.
+* **analytics\_events** — id, user\_id FK, event\_type, metadata jsonb, created\_at.
+* **cache\_llm\_responses** — prompt\_hash unique, response jsonb, created\_at.
+
+#### API Endpoints / Server Actions (Clerk JWT unless noted)
+
+1. `POST /api/auth/signup` & `/login` – public via Clerk SDK.
+2. `GET /api/profile` & `PUT /api/profile` – read/update `user_profile_settings`.
+3. CRUD `/api/documents` and `/api/documents/:id/versions`.
+4. `GET /api/suggestions/:id` & `PATCH /api/suggestions/:id` (accept/reject).
+5. `POST /api/llm/analyze` (LanguageTool proxy), `/generate-hook`, `/onscreen-text`, `/rewrite`, `/shorten`, `/delivery-tips` (GPT-4o).
+6. `POST /api/events` – analytics fire-and-forget.
+
+#### Key Components (Next.js 13 +/app)
+
+* **ClerkProvider** – auth context & route guard.
+* **OnboardingFlow** – brand voice & writing approach steps.
+* **DocumentListPage** – “New Document” CTA, list of docs.
+* **EditorPage** – TipTap editor, SuggestionPanel, ActionBar buttons (Hook, Rewrite, Shorten).
+* **SuggestionPanel** – grouped tabs, accept/reject UI.
+* **Zustand Store** – local state + Supabase Realtime sync.
+* **Server Utilities** – `withClerkAuth`, `injectBrandVoice`, `llmCache`, `rateLimiter`, `logAnalytics`.
+* **Styling** – Tailwind + Shadcn UI + Framer Motion for subtle animations.
+
+---
+
+### MVP Launch Requirements
+
+1. Clerk email/OAuth signup with Supabase RLS bridged via Clerk JWT.
+2. Create, read, update, delete documents; autosave raw text to Supabase.
+3. Real-time TipTap editor with red/blue underlines from LanguageTool spell/grammar checks.
+4. “Generate on-screen hook” & “Generate on-screen text” actions return suggestions stored as `type='onscreen_text'`.
+5. “Rewrite Conversational” and “Shorten to 30 s” actions create new `document_version` and suggestions.
+6. Brand voice & writing approach rules injected into every GPT-4o prompt.
+7. Delivery-tips generator returns bullet advice stored as `type='delivery'`.
+8. SuggestionPanel shows explanations, supports accept/reject, and patches text.
+9. Supabase Realtime broadcasts new suggestions/version updates across tabs.
+10. Prompt-hash caching and per-user rate limiting for all GPT-4o calls.
+11. Analytics events logged for document actions and suggestion acceptance.
+12. Vercel deployment with environment secrets, `/api/health` route, and CI preview builds.

@@ -11,7 +11,7 @@ import { db } from "@/db/db"
 import { suggestionsTable, type Suggestion } from "@/db/schema"
 import { eq, and, sql, inArray } from "drizzle-orm"
 import { checkSpellingWithLanguageToolAction } from "./languagetool-actions"
-import { checkGrammarWithOpenRouterAction } from "./openrouter-grammar-actions"
+import { checkGrammarWithOpenAIAction } from "./openai-grammar-actions"
 import type { ActionState } from "@/types/server-action-types"
 
 interface TextSegment {
@@ -213,7 +213,7 @@ export async function targetedRecheckAction(
          // For both checks: use full text, but we'll filter results to the segment range later
          const [spellResult, grammarResult] = await Promise.all([
            checkSpellingWithLanguageToolAction(fullText, documentId, segment.startOffset, segment.endOffset),
-           checkGrammarWithOpenRouterAction(fullText, documentId)
+           checkGrammarWithOpenAIAction(fullText, documentId)
          ])
          
          if (spellResult.isSuccess && spellResult.data) {
@@ -224,7 +224,7 @@ export async function targetedRecheckAction(
          
          if (grammarResult.isSuccess && grammarResult.data) {
            // Filter grammar suggestions to only include those within the segment range
-           const segmentGrammarSuggestions = grammarResult.data.filter(suggestion => {
+           const segmentGrammarSuggestions = grammarResult.data.filter((suggestion: Suggestion) => {
              const suggStart = suggestion.startOffset || 0
              const suggEnd = suggestion.endOffset || 0
              

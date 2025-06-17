@@ -12,7 +12,7 @@ import {
 } from "react"
 import { checkGrammarWithLanguageToolAction } from "@/actions/languagetool-actions"
 import { checkSpellingWithLanguageToolAction, checkGrammarOnlyWithLanguageToolAction } from "@/actions/languagetool-actions"
-import { checkGrammarWithOpenRouterAction } from "@/actions/openrouter-grammar-actions"
+import { checkGrammarWithOpenAIAction } from "@/actions/openai-grammar-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
 import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms } from "slate"
@@ -303,8 +303,8 @@ export const EditableContent = forwardRef<
         console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
         console.log("🤖 SLATE: Document ID:", docId)
         
-        // Use OpenRouter for grammar analysis
-        const result = await checkGrammarWithOpenRouterAction(text, docId)
+        // Use OpenAI for grammar analysis
+        const result = await checkGrammarWithOpenAIAction(text, docId)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
           console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
@@ -339,8 +339,8 @@ export const EditableContent = forwardRef<
       console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
       console.log("🤖 SLATE: Document ID:", docId)
       
-      // Use OpenRouter for grammar analysis
-      const result = await checkGrammarWithOpenRouterAction(text, docId)
+      // Use OpenAI for grammar analysis
+      const result = await checkGrammarWithOpenAIAction(text, docId)
       
       if (result.isSuccess && result.data && Array.isArray(result.data)) {
         console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
@@ -358,9 +358,41 @@ export const EditableContent = forwardRef<
     }
   }, [onSuggestionsUpdated, isGrammarCheckInProgress])
 
+  // Format toggle functions
+  const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline') => {
+    const isActive = Editor.marks(editor)?.[format] === true
+    
+    if (isActive) {
+      Editor.removeMark(editor, format)
+    } else {
+      Editor.addMark(editor, format, true)
+    }
+  }, [editor])
+
+  const isFormatActive = useCallback((format: 'bold' | 'italic' | 'underline') => {
+    const marks = Editor.marks(editor)
+    return marks ? marks[format] === true : false
+  }, [editor])
+
+  // Update format state based on current selection
+  const updateFormatState = useCallback(() => {
+    if (onFormatStateChange) {
+      onFormatStateChange({
+        isBold: isFormatActive('bold'),
+        isItalic: isFormatActive('italic'),
+        isUnderlined: isFormatActive('underline'),
+        isBulletList: false, // TODO: implement list detection
+        isNumberedList: false // TODO: implement list detection
+      })
+    }
+  }, [onFormatStateChange, isFormatActive])
+
   // Handle content changes
   const handleChange = useCallback((newValue: Descendant[]) => {
     setValue(newValue)
+    
+    // Update format state when content or selection changes
+    updateFormatState()
     
     // Convert to text for checking
     const plainText = slateToText(newValue)
@@ -376,15 +408,13 @@ export const EditableContent = forwardRef<
       return
     }
     
-    // Trigger both spelling and grammar checks on content changes
+    // Only trigger spelling checks on content changes
+    // Grammar checks are now ONLY triggered by period/newline in handleKeyDown
     if (documentId && plainText.trim()) {
       // Immediate spell check (500ms delay)
       debouncedSpellingCheckOnEdit(plainText, documentId)
-      
-      // AI grammar check with faster delay (1000ms) - also triggered by period/newline
-      debouncedGrammarCheckWithAI(plainText, documentId)
     }
-  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, debouncedGrammarCheckWithAI, isAcceptingSuggestion])
+  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, isAcceptingSuggestion, updateFormatState])
 
   // Create decorations for suggestions
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -541,15 +571,15 @@ export const EditableContent = forwardRef<
     switch (event.key) {
       case 'b':
         event.preventDefault()
-        // Toggle bold (implement later)
+        toggleFormat('bold')
         break
       case 'i':
         event.preventDefault()
-        // Toggle italic (implement later)
+        toggleFormat('italic')
         break
       case 'u':
         event.preventDefault()
-        // Toggle underline (implement later)
+        toggleFormat('underline')
         break
     }
   }, [documentId, isAcceptingSuggestion, value, debouncedSpellCheck, immediateGrammarCheck])
@@ -657,8 +687,9 @@ export const EditableContent = forwardRef<
     const refInterface = {
       formatText: (command: string) => {
         ReactEditor.focus(editor)
-        // Implement formatting commands
-        console.log("Format command:", command)
+        if (command === 'bold' || command === 'italic' || command === 'underline') {
+          toggleFormat(command)
+        }
       },
       toggleBulletList: () => {
         ReactEditor.focus(editor)
@@ -682,18 +713,10 @@ export const EditableContent = forwardRef<
     return refInterface
   }, [editor, acceptSuggestion])
 
-  // Update format state (simplified for now)
+  // Update format state when selection changes
   useEffect(() => {
-    if (onFormatStateChange) {
-      onFormatStateChange({
-        isBold: false,
-        isItalic: false,
-        isUnderlined: false,
-        isBulletList: false,
-        isNumberedList: false
-      })
-    }
-  }, [onFormatStateChange])
+    updateFormatState()
+  }, [value, updateFormatState])
 
   return (
     <div className="slate-editor relative" onClick={handleClick}>

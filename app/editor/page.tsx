@@ -288,37 +288,59 @@ export default function GrammarlyEditor() {
       return
     }
 
-    const beforeText = documentContent.substring(0, suggestion.startOffset)
-    const afterText = documentContent.substring(suggestion.endOffset)
-    const newContent = beforeText + suggestion.suggestedText + afterText
-    
-    setDocumentContent(newContent)
-    
-    if (documentId) {
-      try {
-        await logSuggestionAcceptedAction(
-          suggestion.id,
-          suggestion.suggestionType || 'unknown',
-          documentId
-        )
-      } catch (error) {
-        console.error("Failed to log suggestion accepted event:", error)
-      }
-    }
-    
-    // Remove the accepted suggestion from the list immediately
-    setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
-    
-    setTimeout(() => {
-      refreshSuggestions()
-    }, 500)
-    
-    console.log("Applied suggestion:", {
-      before: documentContent.substring(suggestion.startOffset, suggestion.endOffset),
-      after: suggestion.suggestedText,
-      newContent
+    console.log("🎯 PARENT: Accepting suggestion via editor:", {
+      id: suggestion.id,
+      text: suggestion.suggestedText
     })
-  }, [documentContent, documentId, refreshSuggestions])
+
+    // Use the editor's acceptSuggestion method for better handling
+    if (editorRef.current) {
+      try {
+        editorRef.current.acceptSuggestion(suggestion)
+        
+        // Log analytics event
+        if (documentId) {
+          await logSuggestionAcceptedAction(
+            suggestion.id,
+            suggestion.suggestionType || 'unknown',
+            documentId
+          )
+        }
+        
+        // Remove the accepted suggestion from the list immediately
+        setRealSuggestions(prev => {
+          const filtered = prev.filter(s => s.id !== suggestion.id)
+          console.log(`🎯 PARENT: Updated suggestions from ${prev.length} to ${filtered.length}`)
+          return filtered
+        })
+        
+        // Show success message
+        toast({
+          title: "Suggestion Applied",
+          description: `Changed to "${suggestion.suggestedText}"`
+        })
+        
+        // Refresh suggestions after a brief delay
+        setTimeout(() => {
+          refreshSuggestions()
+        }, 500)
+        
+      } catch (error) {
+        console.error("Failed to apply suggestion:", error)
+        toast({
+          title: "Error",
+          description: "Failed to apply suggestion. Please try again.",
+          variant: "destructive"
+        })
+      }
+    } else {
+      toast({
+        title: "Error",
+        description: "Editor not available. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }, [documentId, refreshSuggestions])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
     console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {
@@ -338,7 +360,11 @@ export default function GrammarlyEditor() {
       if (result.isSuccess) {
         console.log("🔍 DISMISSAL DEBUG: Dismissal successful, removing from local state")
         // Remove the dismissed suggestion from the list immediately
-        setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+        setRealSuggestions(prev => {
+          const filtered = prev.filter(s => s.id !== suggestion.id)
+          console.log(`🎨 PARENT: Updated realSuggestions from ${prev.length} to ${filtered.length} suggestions`)
+          return filtered
+        })
         
         // Log analytics event
         if (documentId) {
@@ -525,7 +551,7 @@ export default function GrammarlyEditor() {
         <div className="flex flex-1 overflow-hidden">
           {/* Text editor */}
           <div className="flex-1 overflow-auto p-8">
-            <div className="prose w-full max-w-none">
+            <div className="prose w-full max-w-none" spellCheck="false">
               <EditableContent
                 ref={editorRef}
                 initialContent={documentContent}
@@ -533,7 +559,7 @@ export default function GrammarlyEditor() {
                 onFormatStateChange={handleFormatStateChange}
                 documentId={documentId || undefined}
                 onSuggestionClick={handleSuggestionClick}
-
+                suggestions={suggestions}
                 onSuggestionsUpdated={refreshSuggestions}
               />
             </div>

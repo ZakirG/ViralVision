@@ -28,6 +28,7 @@ import {
 import type { Document } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 import { NewDocumentModal } from "@/components/new-document-modal"
+import { htmlToPreviewText } from "@/lib/utils"
 
 export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -285,9 +286,13 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent className="pt-0">
                     <p className="mb-4 line-clamp-3 text-sm text-gray-600">
-                      {doc.rawText && doc.rawText.length > 100
-                        ? doc.rawText.substring(0, 100) + "..."
-                        : doc.rawText || "No content yet"}
+                      {(() => {
+                        if (!doc.rawText) return "No content yet"
+                        const cleanText = htmlToPreviewText(doc.rawText)
+                        return cleanText.length > 100
+                          ? cleanText.substring(0, 100) + "..."
+                          : cleanText
+                      })()}
                     </p>
 
                     {/* Footer with actions */}

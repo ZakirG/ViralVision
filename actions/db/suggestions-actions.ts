@@ -141,9 +141,22 @@ export async function dismissSuggestionAction(
     
     // If originalText is missing and we have document content and offsets, populate it
     let originalText = existingSuggestion.originalText
+    console.log("🔍 DISMISSAL DEBUG: Existing suggestion details:", {
+      id: existingSuggestion.id,
+      originalText: existingSuggestion.originalText,
+      suggestedText: existingSuggestion.suggestedText,
+      startOffset: existingSuggestion.startOffset,
+      endOffset: existingSuggestion.endOffset,
+      hasDocumentContent: !!documentContent
+    })
+    
     if (!originalText && documentContent && existingSuggestion.startOffset !== null && existingSuggestion.endOffset !== null) {
       originalText = documentContent.substring(existingSuggestion.startOffset, existingSuggestion.endOffset)
-      console.log("🔍 DISMISSAL DEBUG: Populated missing originalText:", originalText)
+      console.log("🔍 DISMISSAL DEBUG: Populated missing originalText from document content:", originalText)
+    } else if (originalText) {
+      console.log("🔍 DISMISSAL DEBUG: Using existing originalText:", originalText)
+    } else {
+      console.log("🔍 DISMISSAL DEBUG: No originalText available - missing document content or offsets")
     }
     
     const [updatedSuggestion] = await db

@@ -254,10 +254,33 @@ export async function checkGrammarWithLanguageToolAction(
         
         console.log(`🔧 DUPLICATE CHECK: Processing suggestion for "${originalText}" -> "${suggestedText}"`)
 
-        // Check if we already have a dismissed suggestion for this exact text + replacement combo
+        // Check if we already have a dismissed suggestion for this text/position
         console.log(`🔧 DUPLICATE CHECK: Querying for existing dismissed suggestion with originalText="${originalText}", suggestedText="${suggestedText}", documentId="${documentId}"`)
         
-        const existingDismissedSuggestion = await db
+        // DEBUG: Let's see all dismissed suggestions for this document first
+        const allDismissedForDoc = await db
+          .select()
+          .from(suggestionsTable)
+          .where(
+            and(
+              eq(suggestionsTable.documentId, documentId),
+              eq(suggestionsTable.dismissed, true)
+            )
+          )
+        
+        console.log(`🔧 DUPLICATE DEBUG: Found ${allDismissedForDoc.length} total dismissed suggestions for document:`)
+        allDismissedForDoc.forEach((dismissed, i) => {
+          console.log(`🔧 DUPLICATE DEBUG: Dismissed ${i}:`, {
+            id: dismissed.id,
+            originalText: dismissed.originalText,
+            suggestedText: dismissed.suggestedText,
+            startOffset: dismissed.startOffset,
+            endOffset: dismissed.endOffset
+          })
+        })
+        
+        // First try exact match (current logic)
+        let existingDismissedSuggestion = await db
           .select()
           .from(suggestionsTable)
           .where(
@@ -269,6 +292,67 @@ export async function checkGrammarWithLanguageToolAction(
             )
           )
           .limit(1)
+        
+        console.log(`🔧 DUPLICATE DEBUG: Exact match query for originalText="${originalText}", suggestedText="${suggestedText}" returned ${existingDismissedSuggestion.length} results`)
+
+        // If no exact match, check for dismissed suggestions in similar position range
+        // This handles cases where text might have changed slightly
+        if (existingDismissedSuggestion.length === 0) {
+          console.log(`🔧 DUPLICATE CHECK: No exact match found, checking position-based duplicates...`)
+          
+          const positionTolerance = 10 // Allow 10 character tolerance
+          
+          console.log(`🔧 DUPLICATE DEBUG: Current match details:`, {
+            originalText: originalText,
+            suggestedText: suggestedText,
+            startOffset: match.offset,
+            endOffset: match.offset + match.length,
+            matchType: match.type?.typeName
+          })
+
+          // Check if any dismissed suggestion overlaps with current position
+          existingDismissedSuggestion = allDismissedForDoc.filter(dismissed => {
+            if (dismissed.startOffset === null || dismissed.endOffset === null) {
+              console.log(`🔧 DUPLICATE DEBUG: Skipping dismissed suggestion ${dismissed.id} - null offsets`)
+              return false
+            }
+            
+            const currentStart = match.offset
+            const currentEnd = match.offset + match.length
+            const dismissedStart = dismissed.startOffset
+            const dismissedEnd = dismissed.endOffset
+            
+            // Check for overlap or nearby position
+            const hasOverlap = (currentStart < dismissedEnd + positionTolerance) && 
+                              (currentEnd > dismissedStart - positionTolerance)
+            
+            // Also check if the original text is similar (to catch minor text changes)
+            const isSimilarText = dismissed.originalText && 
+                                 originalText.toLowerCase().trim() === dismissed.originalText.toLowerCase().trim()
+            
+            // Check if suggested text matches
+            const isSameSuggestion = dismissed.suggestedText === suggestedText
+            
+            console.log(`🔧 DUPLICATE DEBUG: Checking dismissed suggestion ${dismissed.id}:`, {
+              dismissedOriginal: dismissed.originalText,
+              dismissedSuggested: dismissed.suggestedText,
+              dismissedPosition: `${dismissedStart}-${dismissedEnd}`,
+              currentOriginal: originalText,
+              currentSuggested: suggestedText,
+              currentPosition: `${currentStart}-${currentEnd}`,
+              hasOverlap,
+              isSimilarText,
+              isSameSuggestion,
+              shouldSkip: hasOverlap || isSimilarText || isSameSuggestion
+            })
+            
+            if (hasOverlap || isSimilarText || isSameSuggestion) {
+              console.log(`🔧 DUPLICATE CHECK: Found position-based match - will skip creating suggestion`)
+              return true
+            }
+            return false
+          })
+        }
 
         console.log(`🔧 DUPLICATE CHECK: Found ${existingDismissedSuggestion.length} existing dismissed suggestions`)
         if (existingDismissedSuggestion.length > 0) {

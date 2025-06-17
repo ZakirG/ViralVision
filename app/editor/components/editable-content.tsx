@@ -7,11 +7,45 @@ import {
   useEffect,
   useImperativeHandle,
   forwardRef,
-  useCallback
+  useCallback,
+  useMemo
 } from "react"
 import { checkGrammarWithLanguageToolAction } from "@/actions/languagetool-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
+import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms } from "slate"
+import { Slate, Editable, withReact, ReactEditor } from "slate-react"
+import { withHistory, HistoryEditor } from "slate-history"
+
+// Define custom types for Slate
+type CustomElement = {
+  type: 'paragraph'
+  children: CustomText[]
+}
+
+type CustomText = {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+}
+
+type CustomRange = {
+  anchor: { path: number[]; offset: number }
+  focus: { path: number[]; offset: number }
+  suggestion?: boolean
+  suggestionId?: string
+  title?: string
+}
+
+declare module 'slate' {
+  interface CustomTypes {
+    Editor: BaseEditor & ReactEditor & HistoryEditor
+    Element: CustomElement
+    Text: CustomText
+    Range: CustomRange
+  }
+}
 
 // Simple debounce function
 function debounce<T extends (...args: any[]) => void>(func: T, delay: number): T {
@@ -29,6 +63,7 @@ interface EditableContentProps {
   documentId?: string
   onSuggestionClick?: (suggestion: Suggestion) => void
   onSuggestionsUpdated?: () => void
+  suggestions?: Suggestion[] // Add suggestions as props
 }
 
 interface FormatState {
@@ -44,720 +79,441 @@ export interface EditableContentRef {
   toggleBulletList: () => void
   toggleNumberedList: () => void
   focus: () => void
+  acceptSuggestion: (suggestion: Suggestion) => void
+}
+
+// Custom leaf component for rendering suggestions
+const Leaf = ({ attributes, children, leaf }: any) => {
+  if (leaf.suggestion) {
+    return (
+      <span
+        {...attributes}
+        className="suggestion-highlight cursor-pointer"
+        data-suggestion-id={leaf.suggestionId}
+        title={leaf.title || 'Click for suggestion'}
+        style={{
+          backgroundColor: '#fce7f3',
+          borderRadius: '2px',
+          padding: '1px 2px',
+          transition: 'background-color 0.2s ease'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = '#fbb6ce'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = '#fce7f3'
+        }}
+      >
+        {children}
+      </span>
+    )
+  }
+
+  let styledChildren = children
+
+  if (leaf.bold) {
+    styledChildren = <strong>{styledChildren}</strong>
+  }
+
+  if (leaf.italic) {
+    styledChildren = <em>{styledChildren}</em>
+  }
+
+  if (leaf.underline) {
+    styledChildren = <u>{styledChildren}</u>
+  }
+
+  return <span {...attributes}>{styledChildren}</span>
+}
+
+// Convert HTML/rich text to Slate nodes
+const htmlToSlate = (html: string): Descendant[] => {
+  // For now, convert to plain text and create simple paragraph nodes
+  // This can be enhanced later to handle more complex HTML
+  const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
+  
+  if (!text.trim()) {
+    return [{ type: 'paragraph', children: [{ text: '' }] }]
+  }
+
+  const lines = text.split('\n')
+  return lines.map(line => ({
+    type: 'paragraph',
+    children: [{ text: line }]
+  }))
+}
+
+// Convert Slate nodes to plain text (must match offset calculation logic)
+const slateToText = (nodes: Descendant[]): string => {
+  const parts: string[] = []
+  
+  nodes.forEach((node, index) => {
+    const text = Node.string(node)
+    parts.push(text)
+    
+    // Add newline between paragraphs (except after the last one)
+    if (index < nodes.length - 1) {
+      parts.push('\n')
+    }
+  })
+  
+  return parts.join('')
+}
+
+// Convert Slate nodes to HTML (preserving formatting)
+const slateToHtml = (nodes: Descendant[]): string => {
+  return nodes
+    .map(node => {
+      const text = Node.string(node)
+      if (!text.trim()) return '<br>'
+      return text
+    })
+    .join('\n')
+    .replace(/\n/g, '<br>')
 }
 
 export const EditableContent = forwardRef<
   EditableContentRef,
   EditableContentProps
->(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated }, ref) => {
-  const editorRef = useRef<HTMLDivElement>(null)
-  const [isInitialized, setIsInitialized] = useState(false)
+>(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, suggestions: propSuggestions = [] }, ref) => {
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
-
-
-  // Debug suggestions state changes
+  
+  // Use suggestions from props instead of internal state
+  const suggestions = propSuggestions
+  
+  // Debug prop suggestions
   useEffect(() => {
-    // console.log("🔄 Suggestions state changed to:", suggestions.length, "suggestions")
-    // suggestions.forEach((s, i) => {
-    //   console.log(`🔄 Suggestion ${i}: ${s.suggestionType} "${s.suggestedText}" at ${s.startOffset}-${s.endOffset}`)
-    // })
-  }, [suggestions])
-  const lastCleanTextRef = useRef<string>("")
-  const isUpdatingContentRef = useRef(false)
-  const isProcessingEnterRef = useRef(false)
-  const isProcessingUserInputRef = useRef(false)
-  const pendingSuggestionUpdateRef = useRef(false)
-  const [textContent, setTextContent] = useState(initialContent)
-
-
-
-  // Get clean text content from editor, stripping all HTML
-  const getCleanTextContent = useCallback(() => {
-    // console.log("🧹 CLIENT: getCleanTextContent called")
-    
-    if (!editorRef.current) {
-      // console.log("🧹 CLIENT: getCleanTextContent - no editorRef.current, returning empty string")
-      return ''
-    }
-    
-    const innerHTML = editorRef.current.innerHTML
-    // console.log("🧹 CLIENT: getCleanTextContent - innerHTML:", innerHTML)
-    
-    // Create a temporary div to parse HTML
-    const tempDiv = document.createElement('div')
-    tempDiv.innerHTML = innerHTML
-    
-    // Remove all suggestion span elements
-    const suggestionSpans = tempDiv.querySelectorAll('.suggestion-underline, .suggestion-selected')
-    suggestionSpans.forEach(span => {
-      const parent = span.parentNode
-      if (parent) {
-        // Replace the span with its text content
-        const textNode = document.createTextNode(span.textContent || '')
-        parent.replaceChild(textNode, span)
-      }
-    })
-    
-    // Convert <br> tags to newlines
-    const brTags = tempDiv.querySelectorAll('br')
-    brTags.forEach(br => {
-      br.replaceWith('\n')
-    })
-    
-    // Handle block-level elements (div, p, etc.) by adding newlines
-    const blockElements = tempDiv.querySelectorAll('div, p, h1, h2, h3, h4, h5, h6')
-    blockElements.forEach(element => {
-      // Add newline before the element if it's not the first child
-      if (element.previousSibling) {
-        element.insertAdjacentText('beforebegin', '\n')
-      }
-      // Replace the element with its text content
-      element.replaceWith(element.textContent || '')
-    })
-    
-    const cleanText = tempDiv.textContent || ''
-    // console.log("🧹 CLIENT: getCleanTextContent - cleanText:", cleanText)
-    return cleanText
-  }, [])
-
-  // Save cursor position based on text content (not DOM structure)
-  const saveCursorPosition = useCallback(() => {
-    if (!editorRef.current) {
-      return 0
-    }
-    
-    try {
-      const selection = window.getSelection()
-      if (!selection || selection.rangeCount === 0) {
-        return 0
-      }
-      
-      const range = selection.getRangeAt(0)
-      const preCaretRange = range.cloneRange()
-      preCaretRange.selectNodeContents(editorRef.current)
-      preCaretRange.setEnd(range.startContainer, range.startOffset)
-      
-      // Get text position without HTML tags
-      const tempDiv = document.createElement('div')
-      tempDiv.appendChild(preCaretRange.cloneContents())
-      
-      // Clean up suggestion spans in the range
-      const suggestionSpans = tempDiv.querySelectorAll('.suggestion-underline')
-      suggestionSpans.forEach(span => {
-        const textNode = document.createTextNode(span.textContent || '')
-        span.parentNode?.replaceChild(textNode, span)
-      })
-      
-      const position = (tempDiv.textContent || "").length
-      return position
-    } catch (error) {
-      console.error("saveCursorPosition: Failed to save cursor position:", error)
-      return 0
-    }
-  }, [])
-
-  // Restore cursor position based on text content
-  const restoreCursorPosition = useCallback((position: number) => {
-    if (!editorRef.current) {
-      return
-    }
-
-    const walker = document.createTreeWalker(
-      editorRef.current,
-      NodeFilter.SHOW_TEXT,
-      null
+    console.log(`🎨 PROPS: Received ${suggestions.length} suggestions from parent:`, 
+      suggestions.map(s => ({ id: s.id, text: s.suggestedText, dismissed: s.dismissed }))
     )
+  }, [suggestions])
 
-    let charCount = 0
-    let node = walker.nextNode()
+  // Create Slate editor with plugins
+  const editor = useMemo(
+    () => withHistory(withReact(createEditor())),
+    []
+  )
 
-    while (node) {
-      const nodeLength = node.textContent?.length || 0
-      
-      if (charCount + nodeLength >= position) {
-        const range = document.createRange()
-        const selection = window.getSelection()
-        
-        const offset = Math.min(position - charCount, nodeLength)
-        range.setStart(node, Math.max(0, offset))
-        range.collapse(true)
-        
-        selection?.removeAllRanges()
-        selection?.addRange(range)
-        break
-      }
-      
-      charCount += nodeLength
-      node = walker.nextNode()
+  // Initialize Slate value from initial content
+  const [value, setValue] = useState<Descendant[]>(() => {
+    return htmlToSlate(initialContent)
+  })
+
+  // Update editor when initialContent changes (e.g., when suggestion is accepted)
+  useEffect(() => {
+    if (initialContent) {
+      const newValue = htmlToSlate(initialContent)
+      setValue(newValue)
     }
-  }, [])
-
-  // Fetch suggestions for the document
-  const fetchSuggestions = useCallback(async (docId: string) => {
-    try {
-      // console.log("📡 fetchSuggestions starting for docId:", docId)
-      setLoadingSuggestions(true)
-      const result = await getSuggestionsByDocumentIdAction(docId, 1) // Version 1
-      // console.log("📡 getSuggestionsByDocumentIdAction result:", result)
-      
-              if (result.isSuccess && result.data) {
-          console.log("🔍 DISMISSAL DEBUG: Raw suggestions from DB:", result.data.length, "suggestions")
-          result.data.forEach((s, i) => {
-            console.log(`🔍 DISMISSAL DEBUG: Suggestion ${i}:`, {
-              id: s.id,
-              accepted: s.accepted,
-              dismissed: s.dismissed, // Add dismissed field debug
-              text: s.suggestedText,
-              startOffset: s.startOffset,
-              endOffset: s.endOffset,
-              type: s.suggestionType
-            })
-          })
-        
-        // Database already filters out dismissed and accepted suggestions
-        // console.log("📡 Raw suggestions from DB:", result.data.length, "suggestions")
-        result.data.forEach((s, i) => {
-          console.log(`📡 Suggestion ${i}:`, {
-            id: s.id,
-            accepted: s.accepted,
-            text: s.suggestedText,
-            startOffset: s.startOffset,
-            endOffset: s.endOffset,
-            type: s.suggestionType
-          })
-        })
-        // console.log("📡 Setting suggestions state to:", result.data.length, "suggestions")
-        setSuggestions(result.data)
-      } else {
-        // console.log("📡 No suggestions or error:", result.message)
-      }
-    } catch (error) {
-      // console.error("❌ Error fetching suggestions:", error)
-    } finally {
-      setLoadingSuggestions(false)
-      // console.log("📡 fetchSuggestions finished")
-    }
-  }, [])
-
-
+  }, [initialContent])
 
   // Debounced grammar check function
   const debouncedGrammarCheck = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
-        // console.log("🚀 CLIENT: debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
+        console.log("🚀 SLATE: debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
         setIsCheckingGrammar(true)
         
         const result = await checkGrammarWithLanguageToolAction(text, docId)
-        // console.log("✅ CLIENT: Grammar check completed, suggestions returned:", result.isSuccess ? result.data?.length || 0 : 0)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
-          // Store the text that was used for this grammar check.
-          lastCleanTextRef.current = text; 
-
           const newSuggestions = result.data as Suggestion[]
-          // console.log("📥 CLIENT: Processing", newSuggestions.length, "new suggestions from grammar check")
-          
-          // **CRITICAL FIX**: After grammar check, re-fetch suggestions from database
-          // to ensure dismissed suggestions don't reappear. The database is the source of truth.
-          console.log("🔍 DISMISSAL DEBUG: Grammar check returned", newSuggestions.length, "suggestions, now re-fetching from DB")
-          console.log("🔍 DISMISSAL DEBUG: New suggestions from grammar API:", newSuggestions.map(s => ({id: s.id, text: s.suggestedText})))
+          console.log("🔍 SLATE: Grammar check returned", newSuggestions.length, "suggestions, now re-fetching from DB")
           
           // Re-sync with database to ensure dismissed suggestions are properly filtered
-          if (documentId) {
-            console.log("🔍 DISMISSAL DEBUG: Calling fetchSuggestions to get filtered results from database")
-            await fetchSuggestions(documentId)
-          }
-          
-          // Notify parent component that suggestions have been updated
           if (onSuggestionsUpdated) {
-            // console.log("📥 CLIENT: Notifying parent of suggestion updates")
             onSuggestionsUpdated()
           }
-        } else {
-          // console.log("❌ CLIENT: No valid suggestions in grammar check result:", result.message)
-          setSuggestions([])
         }
       } catch (error) {
-        // console.error("❌ CLIENT: Grammar check error:", error)
-        setSuggestions([])
+        console.error("❌ SLATE: Grammar check error:", error)
       } finally {
         setIsCheckingGrammar(false)
-        console.log("🏁 CLIENT: Grammar check finished")
+        console.log("🏁 SLATE: Grammar check finished")
       }
-    }, 1000), // 1 second debounce delay for faster feedback
-    [fetchSuggestions, documentId, onSuggestionsUpdated] // Updated dependencies
+    }, 1000),
+    [onSuggestionsUpdated]
   )
 
-  const updateContent = useCallback(() => {
-    // console.log("🔵 CLIENT: updateContent called")
+  // Handle content changes
+  const handleChange = useCallback((newValue: Descendant[]) => {
+    setValue(newValue)
     
-    if (isUpdatingContentRef.current) {
-      console.log("🟡 CLIENT: updateContent skipped - isUpdatingContentRef is true")
-      return
+    // Convert to text for grammar checking
+    const plainText = slateToText(newValue)
+    
+    // Convert to HTML for saving (preserve formatting)
+    const htmlContent = slateToHtml(newValue)
+    
+    console.log("🟢 SLATE: Content changed - text length:", plainText.length)
+    onContentChange(htmlContent)
+    
+    // Trigger grammar check
+    if (documentId && plainText.trim()) {
+      console.log("🟢 SLATE: Triggering debouncedGrammarCheck")
+      debouncedGrammarCheck(plainText, documentId)
+    }
+  }, [onContentChange, documentId, debouncedGrammarCheck])
+
+  // Create decorations for suggestions
+  const decorate = useCallback(([node, path]: [Node, number[]]) => {
+    const ranges: Range[] = []
+    
+    if (!Text.isText(node) || !suggestions.length) {
+      return ranges
     }
 
-    // Get clean text for comparison and grammar checking
-    const cleanText = getCleanTextContent()
+    const nodeText = node.text
+    const fullText = slateToText(value)
     
-    // Get rich HTML content for saving (preserve formatting)
-    const richContent = editorRef.current?.innerHTML || ''
-
-    console.log("🟢 CLIENT: updateContent - cleanText:", cleanText.substring(0, 50) + "...")
-    console.log("🟢 CLIENT: updateContent - textContent:", textContent.substring(0, 50) + "...")
-    console.log("🟢 CLIENT: updateContent - documentId:", documentId)
-    console.log("🟢 CLIENT: updateContent - cleanText.trim().length:", cleanText.trim().length)
-
-    if (cleanText !== textContent) {
-      console.log("🟢 CLIENT: Content changed! Setting new text content")
-      setTextContent(cleanText)
-      // Pass rich HTML content to maintain formatting when saving
-      onContentChange(richContent)
-      
-      // Use the debounced grammar check function
-      if (documentId && cleanText.trim()) {
-        console.log("🟢 CLIENT: Triggering debouncedGrammarCheck with documentId:", documentId, "text:", cleanText)
-        debouncedGrammarCheck(cleanText, documentId)
-      } else {
-        console.log("🔴 CLIENT: NOT triggering grammar check - documentId:", documentId, "cleanText length:", cleanText.trim().length)
-      }
-    } else {
-      console.log("🟡 CLIENT: Content unchanged, skipping grammar check")
-    }
-  }, [textContent, onContentChange, documentId, getCleanTextContent, debouncedGrammarCheck])
-
-  // Update innerHTML with highlighted suggestions while preserving cursor
-  const updateContentWithSuggestions = useCallback((textContent: string, caller?: string) => {
-    console.log("🎭 updateContentWithSuggestions called by:", caller, "text length:", textContent.length)
-    
-    if (!editorRef.current || isUpdatingContentRef.current) {
-      console.log("🎭 Skipping - editorRef.current:", !!editorRef.current, "isUpdatingContentRef.current:", isUpdatingContentRef.current)
-      return
-    }
-    
-    if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
-      console.log("🎭 Fast update without cursor preservation")
-      // Still update the content but without cursor preservation
-      isUpdatingContentRef.current = true
-      const highlightedHTML = highlightSuggestions(textContent)
-      editorRef.current.innerHTML = highlightedHTML
-      isUpdatingContentRef.current = false
-      return
-    }
-    
-    isUpdatingContentRef.current = true
-    const cursorPosition = saveCursorPosition()
-    
-    // Generate highlighted HTML
-    const highlightedHTML = highlightSuggestions(textContent)
-    editorRef.current.innerHTML = highlightedHTML
-    
-    // Restore cursor position after a brief delay
-    setTimeout(() => {
-      restoreCursorPosition(cursorPosition)
-      isUpdatingContentRef.current = false
-    }, 0)
-  }, [saveCursorPosition, restoreCursorPosition, suggestions])
-
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-    const inputType = (e.nativeEvent as InputEvent).inputType
-    
-    // Track that we're processing user input
-    isProcessingUserInputRef.current = true
-    
-    updateContent()
-    
-    // Clear the flag after a brief delay to allow all effects to complete
-    setTimeout(() => {
-      isProcessingUserInputRef.current = false
-      
-      // Process any pending suggestion updates
-      if (pendingSuggestionUpdateRef.current) {
-        pendingSuggestionUpdateRef.current = false
-        const currentContent = getCleanTextContent()
-        updateContentWithSuggestions(currentContent, "handleInput")
-      }
-    }, 100)
-  }
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Let Enter key handle naturally, then clean up content
-    if (e.key === 'Enter') {
-      isProcessingEnterRef.current = true
-      pendingSuggestionUpdateRef.current = false
-      
-      // Clear the flag after Enter has been processed naturally - extended timeout
-      setTimeout(() => {
-        isProcessingEnterRef.current = false
-        updateContent()
-        
-        // Process any pending suggestion updates
-        if (pendingSuggestionUpdateRef.current) {
-          pendingSuggestionUpdateRef.current = false
-          setTimeout(() => {
-            if (editorRef.current) {
-              const currentContent = getCleanTextContent()
-              updateContentWithSuggestions(currentContent, "handleKeyDown")
-            }
-          }, 50) // Small additional delay to ensure DOM is ready
+    // Find the start offset of this text node in the full document
+    let textOffset = 0
+    for (const [n, p] of Node.nodes(editor)) {
+      if (path.length > 0 && p[0] < path[0]) {
+        if (Text.isText(n)) {
+          textOffset += n.text.length
         }
-      }, 100) // Increased delay to allow DOM to fully update
-    }
-  }, [updateContent, getCleanTextContent, updateContentWithSuggestions])
-
-  useImperativeHandle(ref, () => ({
-    formatText: (command: string) => {
-      if (editorRef.current) {
-        editorRef.current.focus()
-        document.execCommand(command, false, undefined)
-        updateContent()
-        updateFormatState()
-      }
-    },
-    toggleBulletList: () => {
-      if (editorRef.current) {
-        editorRef.current.focus()
-        document.execCommand("insertUnorderedList", false, undefined)
-        updateContent()
-        updateFormatState()
-      }
-    },
-    toggleNumberedList: () => {
-      if (editorRef.current) {
-        editorRef.current.focus()
-        document.execCommand("insertOrderedList", false, undefined)
-        updateContent()
-        updateFormatState()
-      }
-    },
-    focus: () => {
-      if (editorRef.current) {
-        editorRef.current.focus()
+        // Add 1 for paragraph breaks (newlines)
+        if (p.length === 1) {
+          textOffset += 1
+        }
+      } else if (path.length > 1 && p[0] === path[0] && p[1] < path[1]) {
+        if (Text.isText(n)) {
+          textOffset += n.text.length
+        }
+      } else if (p.length === path.length && p.every((val, i) => val === path[i])) {
+        break
       }
     }
-  }))
 
-  const updateFormatState = () => {
-    if (!onFormatStateChange) return
-
-    const formatState: FormatState = {
-      isBold: document.queryCommandState("bold"),
-      isItalic: document.queryCommandState("italic"),
-      isUnderlined: document.queryCommandState("underline"),
-      isBulletList: document.queryCommandState("insertUnorderedList"),
-      isNumberedList: document.queryCommandState("insertOrderedList")
-    }
-
-    onFormatStateChange(formatState)
-  }
-
-  const handleSelectionChange = () => {
-    updateFormatState()
-  }
-
-  const highlightSuggestions = (text: string) => {
-    if (!suggestions.length) {
-      return text.replace(/\n/g, "<br>")
-    }
-
-    let highlightedText = text
-    
-    // Sort suggestions by start offset in descending order to avoid offset conflicts
-    const sortedSuggestions = [...suggestions].sort((a, b) => 
-      (b.startOffset || 0) - (a.startOffset || 0)
-    )
-
-
-    sortedSuggestions.forEach((suggestion, index) => {
-      if (suggestion.startOffset !== null && suggestion.endOffset !== null) {
-        const beforeText = highlightedText.substring(0, suggestion.startOffset)
-        const suggestionText = highlightedText.substring(suggestion.startOffset, suggestion.endOffset)
-        const afterText = highlightedText.substring(suggestion.endOffset)
-        
-        console.log(`🖍️ Highlighting suggestion ${index}:`, {
-          startOffset: suggestion.startOffset,
-          endOffset: suggestion.endOffset,
-          originalText: suggestionText,
-          suggestionType: suggestion.suggestionType
-        })
-        
-        const suggestionType = suggestion.suggestionType === 'spelling' ? 'red' : 'blue'
-        const wrappedText = `<span class="suggestion-underline cursor-pointer underline decoration-${suggestionType}-500 decoration-2 decoration-wavy" data-suggestion-id="${suggestion.id}" title="${suggestion.explanation || 'Click for suggestion'}">${suggestionText}</span>`
-        
-        highlightedText = beforeText + wrappedText + afterText
-      } else {
-        console.log(`🖍️ Skipping suggestion ${index} - invalid offsets:`, suggestion.startOffset, suggestion.endOffset)
-      }
-    })
-
-    const result = highlightedText.replace(/\n/g, "<br>")
-    return result
-  }
-
-  // Helper function to extract clean text from HTML content
-  const extractCleanTextFromHTML = useCallback((htmlContent: string) => {
-    // If it's already plain text (no HTML tags), return as-is
-    if (!htmlContent.includes('<') && !htmlContent.includes('>')) {
-      return htmlContent
-    }
-    
-    // Create a temporary div to parse HTML
-    const tempDiv = document.createElement('div')
-    tempDiv.innerHTML = htmlContent
-    
-    // Remove suggestion spans
-    const suggestionSpans = tempDiv.querySelectorAll('.suggestion-underline, .suggestion-selected')
-    suggestionSpans.forEach(span => {
-      const parent = span.parentNode
-      if (parent) {
-        parent.replaceChild(document.createTextNode(span.textContent || ''), span)
-      }
-    })
-    
-    // Convert <br> tags to newlines
-    const brTags = tempDiv.querySelectorAll('br')
-    brTags.forEach(br => {
-      br.replaceWith('\n')
-    })
-    
-    // Handle block-level elements
-    const blockElements = tempDiv.querySelectorAll('div, p, h1, h2, h3, h4, h5, h6')
-    blockElements.forEach(element => {
-      if (element.previousSibling) {
-        element.insertAdjacentText('beforebegin', '\n')
-      }
-      element.replaceWith(element.textContent || '')
-    })
-    
-    return tempDiv.textContent || ''
-  }, [])
-
-  // Fetch suggestions when component mounts or documentId changes
-  useEffect(() => {
-    if (documentId) {
-      fetchSuggestions(documentId)
-    }
-      }, [documentId, fetchSuggestions])
-
-
-
-  // Store suggestions in ref to avoid dependency issues
-  const suggestionsRef = useRef<Suggestion[]>([])
-  
-  // Update suggestions ref when suggestions change
-  useEffect(() => {
-    suggestionsRef.current = suggestions
-  }, [suggestions])
-
-
-
-  // Update content when suggestions change
-  useEffect(() => {
-    
-    if (editorRef.current && isInitialized) {
-      // Skip if any user input is being processed to avoid using stale content
-      if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
-        pendingSuggestionUpdateRef.current = true
+    suggestions.forEach((suggestion) => {
+      if (suggestion.startOffset == null || suggestion.endOffset == null) {
         return
       }
+
+      const suggestionStart = suggestion.startOffset
+      const suggestionEnd = suggestion.endOffset
       
-      // Use getCleanTextContent() to get actual current content, not stale textContent
-      const currentContent = getCleanTextContent()
-      updateContentWithSuggestions(currentContent, "useEffect[suggestions]")
-    } else {
-      // console.log("🎨 Skipping suggestion update - editorRef.current:", !!editorRef.current, "isInitialized:", isInitialized)
-    }
-  }, [suggestions, isInitialized, updateContentWithSuggestions, getCleanTextContent])
-
-  // Update editor when initialContent changes (e.g., when suggestion is accepted)
-  useEffect(() => {
-    if (editorRef.current && isInitialized && initialContent !== editorRef.current.textContent) {
-      // Skip if any user input is being processed to avoid cursor jumping
-      if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
-        return
-      }
+      // Check if this suggestion overlaps with this text node
+      const nodeStart = textOffset
+      const nodeEnd = textOffset + nodeText.length
       
-      // For suggestion updates, use clean text to ensure proper positioning
-      const cleanInitialContent = extractCleanTextFromHTML(initialContent)
-      updateContentWithSuggestions(cleanInitialContent, "useEffect[initialContent]")
-    }
-  }, [initialContent, isInitialized, suggestions, updateContentWithSuggestions, extractCleanTextFromHTML])
-
-  useEffect(() => {
-    if (editorRef.current && !isInitialized) {
-      // Check if initialContent is rich HTML or plain text
-      const isRichHTML = initialContent.includes('<') && initialContent.includes('>')
-      
-      if (isRichHTML) {
-        // If rich HTML, set the HTML directly but extract clean text for comparison
-        editorRef.current.innerHTML = initialContent
-        const cleanText = extractCleanTextFromHTML(initialContent)
-        setTextContent(cleanText)
-      } else {
-        // If plain text, apply suggestion highlighting
-        editorRef.current.innerHTML = highlightSuggestions(initialContent)
-        setTextContent(initialContent)
-      }
-
-      // Focus the editor on mount
-      editorRef.current.focus()
-
-      // Set cursor to end of content
-      const range = document.createRange()
-      const selection = window.getSelection()
-      range.selectNodeContents(editorRef.current)
-      range.collapse(false)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-
-      setIsInitialized(true)
-    }
-  }, [initialContent, isInitialized, suggestions, extractCleanTextFromHTML])
-
-  useEffect(() => {
-    const handleSelectionChangeGlobal = () => {
-      if (document.activeElement === editorRef.current) {
-        updateFormatState()
-      }
-    }
-
-    const handleSuggestionClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (target.classList.contains('suggestion-underline')) {
-        e.preventDefault()
-        e.stopPropagation()
+      if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
+        // Calculate the range within this text node
+        const rangeStart = Math.max(0, suggestionStart - nodeStart)
+        const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
         
-        const suggestionId = target.dataset.suggestionId
-        if (suggestionId && onSuggestionClick) {
-          const suggestion = suggestions.find(s => s.id === suggestionId)
-          if (suggestion) {
-            onSuggestionClick(suggestion)
-          }
+        if (rangeStart < rangeEnd) {
+          console.log(`🎨 SLATE: Adding decoration for suggestion ${suggestion.id} at ${rangeStart}-${rangeEnd} in node`)
+          
+          ranges.push({
+            anchor: { path, offset: rangeStart },
+            focus: { path, offset: rangeEnd },
+            suggestion: true,
+            suggestionId: suggestion.id,
+            title: suggestion.explanation || 'Click for suggestion'
+          })
         }
       }
-    }
+    })
 
-    document.addEventListener("selectionchange", handleSelectionChangeGlobal)
-    if (editorRef.current) {
-      editorRef.current.addEventListener("click", handleSuggestionClick)
-    }
+    return ranges
+  }, [suggestions, value, editor])
 
-    return () => {
-      document.removeEventListener("selectionchange", handleSelectionChangeGlobal)
-      if (editorRef.current) {
-        editorRef.current.removeEventListener("click", handleSuggestionClick)
+  // Handle click events on suggestions
+  const handleClick = useCallback((event: React.MouseEvent) => {
+    const target = event.target as HTMLElement
+    const suggestionId = target.dataset.suggestionId
+    
+    if (suggestionId && onSuggestionClick) {
+      const suggestion = suggestions.find(s => s.id === suggestionId)
+      if (suggestion) {
+        event.preventDefault()
+        event.stopPropagation()
+        onSuggestionClick(suggestion)
       }
     }
   }, [suggestions, onSuggestionClick])
 
+  // Handle keyboard shortcuts for formatting
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (!event.ctrlKey && !event.metaKey) {
+      return
+    }
+
+    switch (event.key) {
+      case 'b':
+        event.preventDefault()
+        // Toggle bold (implement later)
+        break
+      case 'i':
+        event.preventDefault()
+        // Toggle italic (implement later)
+        break
+      case 'u':
+        event.preventDefault()
+        // Toggle underline (implement later)
+        break
+    }
+  }, [])
+
+  // Accept suggestion by replacing text in the editor
+  const acceptSuggestion = useCallback((suggestion: Suggestion) => {
+    if (suggestion.startOffset == null || suggestion.endOffset == null || !suggestion.suggestedText) {
+      console.error("Invalid suggestion data for acceptance:", suggestion)
+      return
+    }
+
+    console.log("🎯 SLATE: Accepting suggestion:", {
+      id: suggestion.id,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset,
+      originalText: suggestion.originalText,
+      suggestedText: suggestion.suggestedText
+    })
+
+    // Convert the current editor value to text to verify positioning
+    const fullText = slateToText(value)
+    console.log("🎯 SLATE: Full text:", `"${fullText}"`)
+    console.log("🎯 SLATE: Text to replace:", `"${fullText.substring(suggestion.startOffset, suggestion.endOffset)}"`)
+    console.log("🎯 SLATE: Will replace with:", `"${suggestion.suggestedText}"`)
+
+    // Build a mapping of text offsets to Slate positions
+    const offsetToPosition: Array<{ path: number[], offset: number }> = []
+    let textOffset = 0
+
+    // Walk through all text nodes to build offset mapping
+    for (const [node, path] of Node.nodes(editor)) {
+      if (Text.isText(node)) {
+        // Map each character position in this text node
+        for (let i = 0; i <= node.text.length; i++) {
+          offsetToPosition[textOffset + i] = { path, offset: i }
+        }
+        textOffset += node.text.length
+      } else if (path.length === 1 && textOffset > 0) {
+        // Only add newline offset if this is not the first paragraph
+        // and we have some text before this paragraph
+        const paragraphIndex = path[0]
+        if (paragraphIndex > 0) {
+          // Map the newline position to the start of this paragraph
+          offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
+          textOffset += 1
+        }
+      }
+    }
+
+    console.log("🎯 SLATE: Built offset mapping, total text length:", textOffset)
+
+    // Get start and end positions
+    const startPos = offsetToPosition[suggestion.startOffset]
+    const endPos = offsetToPosition[suggestion.endOffset]
+
+    if (!startPos || !endPos) {
+      console.error("🎯 SLATE: Could not find positions for offsets:", {
+        startOffset: suggestion.startOffset,
+        endOffset: suggestion.endOffset,
+        mappingLength: offsetToPosition.length,
+        textLength: fullText.length
+      })
+      return
+    }
+
+    console.log("🎯 SLATE: Found positions:", {
+      startPos,
+      endPos,
+      actualTextToReplace: fullText.substring(suggestion.startOffset, suggestion.endOffset)
+    })
+
+    // Perform the replacement
+    try {
+      // Create the selection range
+      const range = {
+        anchor: startPos,
+        focus: endPos
+      }
+
+      console.log("🎯 SLATE: Applying replacement with range:", range)
+
+      // Select the range and replace with suggested text
+      Transforms.select(editor, range)
+      Transforms.insertText(editor, suggestion.suggestedText)
+
+      console.log("🎯 SLATE: Successfully replaced text")
+
+    } catch (error) {
+      console.error("🎯 SLATE: Error during text replacement:", error)
+    }
+  }, [editor, value])
+
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    formatText: (command: string) => {
+      ReactEditor.focus(editor)
+      // Implement formatting commands
+      console.log("Format command:", command)
+    },
+    toggleBulletList: () => {
+      ReactEditor.focus(editor)
+      // Implement bullet list toggle
+      console.log("Toggle bullet list")
+    },
+    toggleNumberedList: () => {
+      ReactEditor.focus(editor)
+      // Implement numbered list toggle
+      console.log("Toggle numbered list")
+    },
+    focus: () => {
+      ReactEditor.focus(editor)
+    },
+    acceptSuggestion: acceptSuggestion
+  }), [editor, acceptSuggestion])
+
+  // Update format state (simplified for now)
+  useEffect(() => {
+    if (onFormatStateChange) {
+      onFormatStateChange({
+        isBold: false,
+        isItalic: false,
+        isUnderlined: false,
+        isBulletList: false,
+        isNumberedList: false
+      })
+    }
+  }, [onFormatStateChange])
+
   return (
-    <>
+    <div className="slate-editor" onClick={handleClick}>
+      <Slate
+        editor={editor}
+        initialValue={value}
+        onChange={handleChange}
+      >
+        <Editable
+          decorate={decorate}
+          renderLeaf={Leaf}
+          onKeyDown={handleKeyDown}
+          placeholder="Start writing..."
+          spellCheck={false} // Disable browser spell check
+          autoCorrect="off"
+          autoCapitalize="off"
+          style={{
+            minHeight: '400px',
+            fontSize: '18px',
+            lineHeight: '1.6',
+            outline: 'none',
+            caretColor: '#374151'
+          }}
+          className="focus:outline-none"
+        />
+      </Slate>
+      
       <style jsx>{`
-        .editor-content {
-          caret-color: #374151;
-        }
-
-        .editor-content:focus {
-          outline: none;
-        }
-
-        .editor-content::selection {
-          background-color: #dbeafe;
-        }
-
-        .editor-content::-moz-selection {
-          background-color: #dbeafe;
-        }
-
-        .editor-content b,
-        .editor-content strong {
-          font-weight: bold;
-        }
-
-        .editor-content i,
-        .editor-content em {
-          font-style: italic;
-        }
-
-        .editor-content u {
-          text-decoration: underline;
-        }
-
-        .editor-content .error-highlight {
-          text-decoration: underline;
-          text-decoration-color: #ef4444;
-          text-decoration-style: wavy;
-          text-decoration-thickness: 2px;
-        }
-
-        /* Suggestion underline styles */
-        .editor-content .suggestion-underline {
-          cursor: pointer;
-          text-decoration: underline;
-          text-decoration-thickness: 2px;
-          text-decoration-style: wavy;
-        }
-
-        /* Blue underline for grammar suggestions */
-        .editor-content .suggestion-underline.decoration-blue-500 {
-          text-decoration-color: #3b82f6;
-        }
-
-        /* Red underline for spelling suggestions */
-        .editor-content .suggestion-underline.decoration-red-500 {
-          text-decoration-color: #ef4444;
-        }
-
-        .editor-content ol {
-          padding-left: 1.5rem;
-          margin: 1rem 0;
-        }
-
-        .editor-content ul {
-          padding-left: 1.5rem;
-          margin: 1rem 0;
-        }
-
-        .editor-content ol li {
-          margin: 0.5rem 0;
-          list-style-type: decimal;
-        }
-
-        .editor-content ul li {
-          margin: 0.5rem 0;
-          list-style-type: disc;
-        }
-
-        .editor-content li {
-          padding-left: 0.5rem;
-        }
-
-        .editor-content:empty::before {
-          content: attr(data-placeholder);
-          color: #9ca3af;
-          pointer-events: none;
+        .slate-editor .suggestion-highlight:hover {
+          background-color: #fbb6ce !important;
         }
       `}</style>
-
-      <div
-        ref={editorRef}
-        contentEditable
-        suppressContentEditableWarning={true}
-        className="editor-content min-h-[400px] text-lg leading-relaxed outline-none focus:outline-none"
-        style={{
-          whiteSpace: "pre-wrap",
-          wordWrap: "break-word",
-          lineHeight: "1.6"
-        }}
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onMouseUp={handleSelectionChange}
-        onKeyUp={handleSelectionChange}
-        data-placeholder="Start writing..."
-      />
-    </>
+    </div>
   )
 })
 

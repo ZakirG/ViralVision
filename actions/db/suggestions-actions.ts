@@ -209,6 +209,42 @@ export async function dismissSuggestionAction(
   }
 }
 
+export async function dismissAllActiveSuggestionsAction(
+  documentId: string
+): Promise<ActionState<{ dismissedCount: number }>> {
+  try {
+    console.log("🧹 DISMISS ALL: Dismissing all active suggestions for document:", documentId)
+    
+    // Update all non-accepted, non-dismissed suggestions to dismissed
+    const result = await db
+      .update(suggestionsTable)
+      .set({ dismissed: true })
+      .where(
+        and(
+          eq(suggestionsTable.documentId, documentId),
+          eq(suggestionsTable.accepted, false),
+          eq(suggestionsTable.dismissed, false)
+        )
+      )
+      .returning({ id: suggestionsTable.id })
+
+    const dismissedCount = result.length
+    console.log("🧹 DISMISS ALL: Dismissed", dismissedCount, "suggestions")
+
+    return {
+      isSuccess: true,
+      message: `Dismissed ${dismissedCount} active suggestions`,
+      data: { dismissedCount }
+    }
+  } catch (error) {
+    console.error("Error dismissing all suggestions:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to dismiss all suggestions"
+    }
+  }
+}
+
 export async function getSuggestionByIdAction(
   suggestionId: string
 ): Promise<ActionState<Suggestion>> {

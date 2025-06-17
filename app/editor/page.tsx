@@ -50,6 +50,7 @@ import {
   logSuggestionRejectedAction,
   logGrammarCheckAction 
 } from "@/actions/analytics-actions"
+import { targetedRecheckAction } from "@/actions/targeted-recheck-actions"
 import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 
@@ -314,10 +315,10 @@ export default function GrammarlyEditor() {
     }
   }, [documentId, isAcceptingSuggestion])
 
-  const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
+    const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
     // Prevent concurrent suggestion acceptance
     if (isAcceptingSuggestion) {
-      console.log("🎯 PARENT: Already accepting a suggestion, ignoring this request")
+      console.log("⚡ PARENT: Already accepting a suggestion, ignoring this request")
       return
     }
 
@@ -330,114 +331,152 @@ export default function GrammarlyEditor() {
       return
     }
 
-    // Check if the suggestion is still in our current suggestions list
-    // VALIDATION DISABLED FOR DEBUGGING
-    console.log("🎯 PARENT: Proceeding to accept suggestion (validation disabled for debugging):", {
+    console.log("⚡ PARENT: INSTANT ACCEPT - Applying changes immediately:", {
       suggestionId: suggestion.id,
       suggestionText: suggestion.suggestedText
     })
 
-    console.log("🎯 PARENT: Accepting suggestion via editor:", {
-      id: suggestion.id,
-      text: suggestion.suggestedText
-    })
-
-    // Set lock to prevent concurrent operations
-    setIsAcceptingSuggestion(true)
-
-    // Use the editor's acceptSuggestion method for better handling
-    console.log("🎯 PARENT: Checking editorRef.current:", {
-      exists: !!editorRef.current,
-      hasAcceptSuggestion: editorRef.current && typeof editorRef.current.acceptSuggestion === 'function',
-      refMethods: editorRef.current ? Object.keys(editorRef.current) : 'ref is null'
-    })
-    
-    if (editorRef.current) {
-      try {
-        // STEP 1: Mark suggestion as accepted in database to prevent reappearance
-        console.log("🎯 PARENT: Marking suggestion as accepted in database first")
-        const acceptResult = await acceptSuggestionAction(suggestion.id)
-        
-        console.log("🎯 PARENT: acceptSuggestionAction result:", {
-          isSuccess: acceptResult.isSuccess,
-          message: acceptResult.message,
-          data: acceptResult.data
-        })
-        
-        if (!acceptResult.isSuccess) {
-          console.error("🎯 PARENT: Database accept failed:", acceptResult.message)
-          console.log("🎯 PARENT: Current suggestions in UI:", realSuggestions.map(s => ({ id: s.id, text: s.suggestedText })))
-          console.log("🎯 PARENT: Attempted to accept suggestion:", { id: suggestion.id, text: suggestion.suggestedText })
-          
-          toast({
-            title: "Error",
-            description: "Failed to mark suggestion as accepted. This suggestion may have been updated. Please try again.",
-            variant: "destructive"
-          })
-          setIsAcceptingSuggestion(false) // Clear lock
-          return
-        }
-        
-        console.log("🎯 PARENT: Database accept successful, proceeding to text replacement")
-        
-        // STEP 2: Remove the suggestion from local state to prevent highlighting issues
-        setRealSuggestions(prev => {
-          const filtered = prev.filter(s => s.id !== suggestion.id)
-          console.log(`🎯 PARENT: Pre-emptively removed suggestion from state: ${prev.length} -> ${filtered.length}`)
-          return filtered
-        })
-        
-        // STEP 3: Now perform the text replacement
-        console.log("🎯 PARENT: About to call editorRef.current.acceptSuggestion with:", {
-          suggestionId: suggestion.id,
-          suggestionText: suggestion.suggestedText,
-          startOffset: suggestion.startOffset,
-          endOffset: suggestion.endOffset
-        })
-        editorRef.current.acceptSuggestion(suggestion)
-        console.log("🎯 PARENT: Called editorRef.current.acceptSuggestion, no exception thrown")
-        
-        // STEP 4: Log analytics event
-        if (documentId) {
-          await logSuggestionAcceptedAction(
-            suggestion.id,
-            suggestion.suggestionType || 'unknown',
-            documentId
-          )
-        }
-        
-        // Show success message
-        toast({
-          title: "Suggestion Applied",
-          description: `Changed to "${suggestion.suggestedText}"`
-        })
-        
-        // Refresh suggestions after a brief delay
-        setTimeout(() => {
-          refreshSuggestions()
-        }, 500)
-        
-        // Clear lock after successful operation
-        setIsAcceptingSuggestion(false)
-        
-      } catch (error) {
-        console.error("Failed to apply suggestion:", error)
-        toast({
-          title: "Error",
-          description: "Failed to apply suggestion. Please try again.",
-          variant: "destructive"
-        })
-        setIsAcceptingSuggestion(false) // Clear lock
-      }
-    } else {
+    // ⚡ INSTANT STEP 1: Apply text change in editor immediately
+    if (!editorRef.current) {
       toast({
         title: "Error",
         description: "Editor not available. Please try again.",
         variant: "destructive"
       })
-      setIsAcceptingSuggestion(false) // Clear lock
+      return
     }
-  }, [documentId, refreshSuggestions, isAcceptingSuggestion])
+
+    try {
+      console.log("⚡ PARENT: Applying text change instantly in editor")
+      editorRef.current.acceptSuggestion(suggestion)
+      
+      // ⚡ INSTANT STEP 2: Remove suggestion from UI immediately
+      console.log("⚡ PARENT: Removing suggestion from UI instantly")
+      setRealSuggestions(prev => {
+        const filtered = prev.filter(s => s.id !== suggestion.id)
+        console.log(`⚡ PARENT: Instantly removed suggestion from UI: ${prev.length} -> ${filtered.length}`)
+        return filtered
+      })
+      
+      // ⚡ INSTANT STEP 3: Show immediate feedback
+      toast({
+        title: "Applied!",
+        description: `Changed to "${suggestion.suggestedText}"`,
+        duration: 2000
+      })
+      
+      // 🔄 BACKGROUND STEP 4: Do database operations asynchronously (non-blocking)
+      console.log("🔄 PARENT: Starting background database operations...")
+      
+      // Set a brief lock to prevent multiple rapid clicks
+      setIsAcceptingSuggestion(true)
+      setTimeout(() => setIsAcceptingSuggestion(false), 1000)
+      
+      // Fire and forget - do all database operations in background
+      const backgroundOperations = async () => {
+        try {
+          console.log("🔄 BACKGROUND: Marking suggestion as accepted in database")
+          
+          // Database operation 1: Mark as accepted
+          const acceptResult = await acceptSuggestionAction(suggestion.id)
+          
+          if (!acceptResult.isSuccess) {
+            // console.error("🔄 BACKGROUND: Database accept failed (non-critical):", acceptResult.message)
+            // Don't show error to user since UI change already happened
+          } else {
+            console.log("🔄 BACKGROUND: Database accept successful")
+          }
+          
+          // Database operation 2: Log analytics
+          if (documentId) {
+            await logSuggestionAcceptedAction(
+              suggestion.id,
+              suggestion.suggestionType || 'unknown',
+              documentId
+            )
+            console.log("🔄 BACKGROUND: Analytics logged")
+          }
+          
+          // Database operation 3: Targeted recheck for grammar suggestions
+          if (suggestion.suggestionType === 'grammar') {
+            console.log("🔄 BACKGROUND: Starting targeted recheck for grammar suggestion")
+            
+            // Calculate the NEW offsets after the text replacement
+            const originalStart = suggestion.startOffset || 0
+            const originalEnd = suggestion.endOffset || 0
+            const suggestedText = suggestion.suggestedText || ""
+            
+            const newStart = originalStart
+            const newEnd = originalStart + suggestedText.length
+            
+            console.log("🔄 BACKGROUND: Calculating recheck area:", {
+              originalRange: `${originalStart}-${originalEnd}`,
+              newRange: `${newStart}-${newEnd}`,
+              suggestedTextLength: suggestedText.length,
+              originalTextLength: originalEnd - originalStart
+            })
+            
+            if (documentId) {
+              const recheckResult = await targetedRecheckAction(
+                documentContent,
+                documentId,
+                newStart,
+                newEnd
+              )
+              
+              if (recheckResult.isSuccess) {
+                console.log("🔄 BACKGROUND: Targeted recheck completed successfully")
+                const totalNewSuggestions = recheckResult.data.spellingSuggestions.length + recheckResult.data.grammarSuggestions.length
+                
+                if (totalNewSuggestions > 0) {
+                  toast({
+                    title: "Area Updated",
+                    description: `Found ${totalNewSuggestions} new suggestions in affected area`,
+                    duration: 3000
+                  })
+                }
+                
+                // Refresh suggestions to show new ones
+                setTimeout(() => refreshSuggestions(), 200)
+              } else {
+                console.error("🔄 BACKGROUND: Targeted recheck failed:", recheckResult.message)
+                // Fallback to regular refresh
+                setTimeout(() => refreshSuggestions(), 500)
+              }
+            }
+          } else {
+            // For spelling suggestions, just refresh to ensure consistency
+            console.log("🔄 BACKGROUND: Doing background refresh for spelling suggestion")
+            setTimeout(() => refreshSuggestions(), 500)
+          }
+          
+        } catch (error) {
+          console.error("🔄 BACKGROUND: Error in background operations (non-critical):", error)
+          // Fallback: refresh suggestions to ensure consistency
+          setTimeout(() => refreshSuggestions(), 1000)
+        }
+      }
+      
+      // Execute background operations without awaiting
+      backgroundOperations()
+      
+    } catch (error) {
+      console.error("⚡ PARENT: Error during instant text application:", error)
+      toast({
+        title: "Error",
+        description: "Failed to apply suggestion. Please try again.",
+        variant: "destructive"
+      })
+      
+      // Restore suggestion to UI if text application failed
+      setRealSuggestions(prev => {
+        if (!prev.find(s => s.id === suggestion.id)) {
+          return [...prev, suggestion]
+        }
+        return prev
+      })
+    }
+  }, [documentId, refreshSuggestions, isAcceptingSuggestion, documentContent])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
     console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {

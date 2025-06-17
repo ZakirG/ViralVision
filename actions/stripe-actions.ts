@@ -1,18 +1,24 @@
 /*
 <ai_context>
 Contains server actions related to Stripe.
+NOTE: This file needs to be updated to work with the new Supabase schema.
+The old profiles table doesn't exist - Stripe data needs to be stored in 
+user_profile_settings table or a new subscription table.
 </ai_context>
 */
 
+// DISABLED: Needs to be updated for new Supabase schema
+// The profiles table doesn't exist in Supabase
+/*
 import {
   updateProfileAction,
   updateProfileByStripeCustomerIdAction
 } from "@/actions/db/profiles-actions"
-import { SelectProfile } from "@/db/schema"
+// import { SelectProfile } from "@/db/schema" // DISABLED: SelectProfile doesn't exist
 import { stripe } from "@/lib/stripe"
 import Stripe from "stripe"
 
-type MembershipStatus = SelectProfile["membership"]
+type MembershipStatus = "free" | "pro" // SelectProfile["membership"]
 
 const getMembershipStatus = (
   status: Stripe.Subscription.Status,
@@ -117,3 +123,12 @@ export const manageSubscriptionStatusChange = async (
       : new Error("Failed to update subscription status")
   }
 }
+*/
+
+// TODO: Update this file to work with the new Supabase schema
+// Options:
+// 1. Add Stripe fields to user_profile_settings table
+// 2. Create a separate subscriptions table
+// 3. Store Stripe data in a new user_subscriptions table
+
+export const placeholder = "Stripe actions disabled pending schema update"

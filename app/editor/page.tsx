@@ -39,7 +39,10 @@ import {
   getDocumentByIdAction,
   updateDocumentAction
 } from "@/actions/db/documents-actions"
-import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
+import { 
+  getSuggestionsByDocumentIdAction, 
+  dismissSuggestionAction 
+} from "@/actions/db/suggestions-actions"
 import { 
   logSuggestionAcceptedAction, 
   logSuggestionRejectedAction,
@@ -82,7 +85,6 @@ export default function GrammarlyEditor() {
   const [saving, setSaving] = useState(false)
   const [selectedSuggestionForPanel, setSelectedSuggestionForPanel] = useState<Suggestion | null>(null)
   const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
 
   const router = useRouter()
@@ -268,16 +270,13 @@ export default function GrammarlyEditor() {
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
       if (result.isSuccess && result.data) {
-        // Filter out accepted and locally dismissed suggestions
-        const filteredSuggestions = result.data.filter(s => 
-          !s.accepted && !dismissedIds.has(s.id)
-        )
-        setRealSuggestions(filteredSuggestions)
+        // Database query already filters out accepted and dismissed suggestions
+        setRealSuggestions(result.data)
       }
     } catch (error) {
       console.error("Error refreshing suggestions:", error)
     }
-  }, [documentId, dismissedIds])
+  }, [documentId])
 
   const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
     if (!suggestion.startOffset || !suggestion.endOffset || !suggestion.suggestedText) {
@@ -322,28 +321,55 @@ export default function GrammarlyEditor() {
   }, [documentContent, documentId, refreshSuggestions])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
-    setDismissedIds(prev => new Set([...prev, suggestion.id]))
-    
-    // Remove the rejected suggestion from the list immediately
-    setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
-    
-    if (documentId) {
-      try {
-        await logSuggestionRejectedAction(
-          suggestion.id,
-          suggestion.suggestionType || 'unknown',
-          documentId
-        )
-      } catch (error) {
-        console.error("Failed to log suggestion rejected event:", error)
-      }
-    }
-    
-    toast({
-      title: "Suggestion Dismissed",
-      description: "The suggestion has been hidden and won't appear again."
+    console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {
+      id: suggestion.id,
+      text: suggestion.suggestedText,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset
     })
-  }, [documentId])
+    
+    try {
+      // Mark suggestion as dismissed in database
+      console.log("🔍 DISMISSAL DEBUG: Calling dismissSuggestionAction for id:", suggestion.id, "with document content")
+      const result = await dismissSuggestionAction(suggestion.id, documentContent)
+      
+      console.log("🔍 DISMISSAL DEBUG: dismissSuggestionAction result:", result)
+      
+      if (result.isSuccess) {
+        console.log("🔍 DISMISSAL DEBUG: Dismissal successful, removing from local state")
+        // Remove the dismissed suggestion from the list immediately
+        setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
+        
+        // Log analytics event
+        if (documentId) {
+          await logSuggestionRejectedAction(
+            suggestion.id,
+            suggestion.suggestionType || 'unknown',
+            documentId
+          )
+        }
+        
+        toast({
+          title: "Suggestion Dismissed",
+          description: "The suggestion has been permanently hidden and won't appear again."
+        })
+      } else {
+        console.log("🔍 DISMISSAL DEBUG: Dismissal failed:", result.message)
+        toast({
+          title: "Error",
+          description: "Failed to dismiss suggestion. Please try again.",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      console.error("🔍 DISMISSAL DEBUG: Failed to dismiss suggestion:", error)
+      toast({
+        title: "Error", 
+        description: "Failed to dismiss suggestion. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }, [documentId, documentContent])
 
   const closeSuggestionPanel = useCallback(() => {
     setSuggestionPanelOpen(false)
@@ -507,7 +533,7 @@ export default function GrammarlyEditor() {
                 onFormatStateChange={handleFormatStateChange}
                 documentId={documentId || undefined}
                 onSuggestionClick={handleSuggestionClick}
-                dismissedIds={dismissedIds}
+
                 onSuggestionsUpdated={refreshSuggestions}
               />
             </div>

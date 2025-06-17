@@ -39,18 +39,38 @@ export async function getSuggestionsByDocumentIdAction(
   versionNumber?: number
 ): Promise<ActionState<Suggestion[]>> {
   try {
+    console.log("🔍 DISMISSAL DEBUG: getSuggestionsByDocumentIdAction called for docId:", documentId, "version:", versionNumber)
+    
     const whereConditions = versionNumber 
       ? and(
           eq(suggestionsTable.documentId, documentId),
-          eq(suggestionsTable.versionNumber, versionNumber)
+          eq(suggestionsTable.versionNumber, versionNumber),
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.accepted, false)
         )
-      : eq(suggestionsTable.documentId, documentId)
+      : and(
+          eq(suggestionsTable.documentId, documentId),
+          eq(suggestionsTable.dismissed, false),
+          eq(suggestionsTable.accepted, false)
+        )
+
+    console.log("🔍 DISMISSAL DEBUG: Filtering with dismissed=false and accepted=false")
 
     const suggestions = await db
       .select()
       .from(suggestionsTable)
       .where(whereConditions)
       .orderBy(desc(suggestionsTable.createdAt))
+
+    console.log("🔍 DISMISSAL DEBUG: Query returned", suggestions.length, "suggestions")
+    suggestions.forEach((s, i) => {
+      console.log(`🔍 DISMISSAL DEBUG: DB Result ${i}:`, {
+        id: s.id,
+        text: s.suggestedText,
+        dismissed: s.dismissed,
+        accepted: s.accepted
+      })
+    })
 
     return {
       isSuccess: true,
@@ -93,6 +113,73 @@ export async function acceptSuggestionAction(
     return {
       isSuccess: false,
       message: "Failed to accept suggestion"
+    }
+  }
+}
+
+export async function dismissSuggestionAction(
+  suggestionId: string,
+  documentContent?: string
+): Promise<ActionState<Suggestion>> {
+  try {
+    console.log("🔍 DISMISSAL DEBUG: dismissSuggestionAction called for suggestionId:", suggestionId)
+    
+    // First get the suggestion to extract originalText if it's missing
+    const [existingSuggestion] = await db
+      .select()
+      .from(suggestionsTable)
+      .where(eq(suggestionsTable.id, suggestionId))
+      .limit(1)
+    
+    if (!existingSuggestion) {
+      console.log("🔍 DISMISSAL DEBUG: Suggestion not found in database for id:", suggestionId)
+      return {
+        isSuccess: false,
+        message: "Suggestion not found"
+      }
+    }
+    
+    // If originalText is missing and we have document content and offsets, populate it
+    let originalText = existingSuggestion.originalText
+    if (!originalText && documentContent && existingSuggestion.startOffset !== null && existingSuggestion.endOffset !== null) {
+      originalText = documentContent.substring(existingSuggestion.startOffset, existingSuggestion.endOffset)
+      console.log("🔍 DISMISSAL DEBUG: Populated missing originalText:", originalText)
+    }
+    
+    const [updatedSuggestion] = await db
+      .update(suggestionsTable)
+      .set({ 
+        dismissed: true,
+        originalText: originalText || existingSuggestion.originalText
+      })
+      .where(eq(suggestionsTable.id, suggestionId))
+      .returning()
+
+    if (!updatedSuggestion) {
+      console.log("🔍 DISMISSAL DEBUG: Suggestion not found in database for id:", suggestionId)
+      return {
+        isSuccess: false,
+        message: "Suggestion not found"
+      }
+    }
+
+    console.log("🔍 DISMISSAL DEBUG: Suggestion successfully dismissed:", {
+      id: updatedSuggestion.id,
+      text: updatedSuggestion.suggestedText,
+      originalText: updatedSuggestion.originalText,
+      dismissed: updatedSuggestion.dismissed
+    })
+
+    return {
+      isSuccess: true,
+      message: "Suggestion dismissed successfully",
+      data: updatedSuggestion
+    }
+  } catch (error) {
+    console.error("Error dismissing suggestion:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to dismiss suggestion"
     }
   }
 }

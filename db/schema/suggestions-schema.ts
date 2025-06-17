@@ -32,11 +32,13 @@ export const suggestionsTable = pgTable("suggestions", {
   versionNumber: integer("version_number").notNull(),
   startOffset: integer("start_offset"),
   endOffset: integer("end_offset"),
+  originalText: text("original_text"), // Track the original text that this suggestion is for
   suggestionType: suggestionTypeEnum("suggestion_type"),
   suggestedText: text("suggested_text"),
   explanation: text("explanation"),
   confidence: numeric("confidence"),
   accepted: boolean("accepted").notNull().default(false),
+  dismissed: boolean("dismissed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull()

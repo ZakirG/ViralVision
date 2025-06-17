@@ -1,7 +1,5 @@
 "use client"
 
-console.log("🚨 BASIC: EditableContent file loaded")
-
 import type React from "react"
 import {
   useState,
@@ -30,7 +28,6 @@ interface EditableContentProps {
   onFormatStateChange?: (formatState: FormatState) => void
   documentId?: string
   onSuggestionClick?: (suggestion: Suggestion) => void
-  dismissedIds?: Set<string>
   onSuggestionsUpdated?: () => void
 }
 
@@ -52,20 +49,20 @@ export interface EditableContentRef {
 export const EditableContent = forwardRef<
   EditableContentRef,
   EditableContentProps
->(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, dismissedIds, onSuggestionsUpdated }, ref) => {
+>(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated }, ref) => {
   const editorRef = useRef<HTMLDivElement>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
-  const [dismissedHashes, setDismissedHashes] = useState<Set<string>>(new Set())
+
 
   // Debug suggestions state changes
   useEffect(() => {
-    console.log("🔄 Suggestions state changed to:", suggestions.length, "suggestions")
-    suggestions.forEach((s, i) => {
-      console.log(`🔄 Suggestion ${i}: ${s.suggestionType} "${s.suggestedText}" at ${s.startOffset}-${s.endOffset}`)
-    })
+    // console.log("🔄 Suggestions state changed to:", suggestions.length, "suggestions")
+    // suggestions.forEach((s, i) => {
+    //   console.log(`🔄 Suggestion ${i}: ${s.suggestionType} "${s.suggestedText}" at ${s.startOffset}-${s.endOffset}`)
+    // })
   }, [suggestions])
   const lastCleanTextRef = useRef<string>("")
   const isUpdatingContentRef = useRef(false)
@@ -74,59 +71,19 @@ export const EditableContent = forwardRef<
   const pendingSuggestionUpdateRef = useRef(false)
   const [textContent, setTextContent] = useState(initialContent)
 
-  // Keep track of the rejected IDs we've already processed.
-  const processedSuggestionIdsRef = useRef<Set<string>>(new Set())
 
-  // Create a stable fingerprint for any given suggestion
-  const createSuggestionHash = useCallback((suggestion: Suggestion, fullText: string): string => {
-    // If offsets are null, we can't create a hash.
-    if (suggestion.startOffset === null || suggestion.endOffset === null) {
-        console.log("🔍 CLIENT: Cannot create hash - null offsets for suggestion:", suggestion.id);
-        return '';
-    }
-
-    // The number of characters to include for context on each side of the flagged text.
-    const CONTEXT_WINDOW = 10;
-    
-    // The actual text that was flagged as an error.
-    const originalText = fullText.substring(suggestion.startOffset, suggestion.endOffset);
-    
-    // The text immediately preceding the error.
-    const prefix = fullText.substring(
-        Math.max(0, suggestion.startOffset - CONTEXT_WINDOW),
-        suggestion.startOffset
-    );
-
-    // The text immediately following the error.
-    const suffix = fullText.substring(
-        suggestion.endOffset,
-        Math.min(fullText.length, suggestion.endOffset + CONTEXT_WINDOW)
-    );
-
-    // The fingerprint is a combination of the context and the error itself.
-    // This is much more stable than just the offset or a server-generated ID.
-    const hash = `${prefix}|${originalText}|${suffix}`;
-    console.log("🔍 CLIENT: Created hash for suggestion:", {
-      originalText,
-      prefix,
-      suffix,
-      hash,
-      suggestionType: suggestion.suggestionType
-    });
-    return hash;
-  }, [])
 
   // Get clean text content from editor, stripping all HTML
   const getCleanTextContent = useCallback(() => {
-    console.log("🧹 CLIENT: getCleanTextContent called")
+    // console.log("🧹 CLIENT: getCleanTextContent called")
     
     if (!editorRef.current) {
-      console.log("🧹 CLIENT: getCleanTextContent - no editorRef.current, returning empty string")
+      // console.log("🧹 CLIENT: getCleanTextContent - no editorRef.current, returning empty string")
       return ''
     }
     
     const innerHTML = editorRef.current.innerHTML
-    console.log("🧹 CLIENT: getCleanTextContent - innerHTML:", innerHTML)
+    // console.log("🧹 CLIENT: getCleanTextContent - innerHTML:", innerHTML)
     
     // Create a temporary div to parse HTML
     const tempDiv = document.createElement('div')
@@ -161,7 +118,7 @@ export const EditableContent = forwardRef<
     })
     
     const cleanText = tempDiv.textContent || ''
-    console.log("🧹 CLIENT: getCleanTextContent - cleanText:", cleanText)
+    // console.log("🧹 CLIENT: getCleanTextContent - cleanText:", cleanText)
     return cleanText
   }, [])
 
@@ -240,13 +197,27 @@ export const EditableContent = forwardRef<
   // Fetch suggestions for the document
   const fetchSuggestions = useCallback(async (docId: string) => {
     try {
-      console.log("📡 fetchSuggestions starting for docId:", docId)
+      // console.log("📡 fetchSuggestions starting for docId:", docId)
       setLoadingSuggestions(true)
       const result = await getSuggestionsByDocumentIdAction(docId, 1) // Version 1
-      console.log("📡 getSuggestionsByDocumentIdAction result:", result)
+      // console.log("📡 getSuggestionsByDocumentIdAction result:", result)
       
-      if (result.isSuccess && result.data) {
-        console.log("📡 Raw suggestions from DB:", result.data.length, "suggestions")
+              if (result.isSuccess && result.data) {
+          console.log("🔍 DISMISSAL DEBUG: Raw suggestions from DB:", result.data.length, "suggestions")
+          result.data.forEach((s, i) => {
+            console.log(`🔍 DISMISSAL DEBUG: Suggestion ${i}:`, {
+              id: s.id,
+              accepted: s.accepted,
+              dismissed: s.dismissed, // Add dismissed field debug
+              text: s.suggestedText,
+              startOffset: s.startOffset,
+              endOffset: s.endOffset,
+              type: s.suggestionType
+            })
+          })
+        
+        // Database already filters out dismissed and accepted suggestions
+        // console.log("📡 Raw suggestions from DB:", result.data.length, "suggestions")
         result.data.forEach((s, i) => {
           console.log(`📡 Suggestion ${i}:`, {
             id: s.id,
@@ -257,102 +228,71 @@ export const EditableContent = forwardRef<
             type: s.suggestionType
           })
         })
-        
-        // Filter out accepted and dismissed suggestions
-        const filteredSuggestions = result.data.filter(s => 
-          !s.accepted && !(dismissedIds && dismissedIds.has(s.id))
-        )
-        console.log("📡 Filtered suggestions:", filteredSuggestions.length, "suggestions after filtering")
-        console.log("📡 Dismissed suggestion IDs:", Array.from(dismissedIds || []))
-        console.log("📡 Setting suggestions state to:", filteredSuggestions.length, "suggestions")
-        setSuggestions(filteredSuggestions)
+        // console.log("📡 Setting suggestions state to:", result.data.length, "suggestions")
+        setSuggestions(result.data)
       } else {
-        console.log("📡 No suggestions or error:", result.message)
+        // console.log("📡 No suggestions or error:", result.message)
       }
     } catch (error) {
-      console.error("❌ Error fetching suggestions:", error)
+      // console.error("❌ Error fetching suggestions:", error)
     } finally {
       setLoadingSuggestions(false)
-      console.log("📡 fetchSuggestions finished")
+      // console.log("📡 fetchSuggestions finished")
     }
-  }, [dismissedIds])
+  }, [])
 
-  // Ref to store dismissed hashes for debounced function
-  const dismissedHashesRef = useRef<Set<string>>(new Set())
 
-  // Update ref when dismissed hashes change
-  useEffect(() => {
-    dismissedHashesRef.current = dismissedHashes
-  }, [dismissedHashes])
 
   // Debounced grammar check function
   const debouncedGrammarCheck = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
-        console.log("🚀 CLIENT: debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
+        // console.log("🚀 CLIENT: debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
         setIsCheckingGrammar(true)
         
         const result = await checkGrammarWithLanguageToolAction(text, docId)
-        console.log("✅ CLIENT: Grammar check completed, suggestions returned:", result.isSuccess ? result.data?.length || 0 : 0)
+        // console.log("✅ CLIENT: Grammar check completed, suggestions returned:", result.isSuccess ? result.data?.length || 0 : 0)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
           // Store the text that was used for this grammar check.
           lastCleanTextRef.current = text; 
 
           const newSuggestions = result.data as Suggestion[]
-          console.log("📥 CLIENT: Processing", newSuggestions.length, "suggestions from grammar check result")
-          console.log("📥 CLIENT: Current dismissed hashes count:", dismissedHashesRef.current.size)
-          console.log("📥 CLIENT: Current dismissed IDs count:", dismissedIdsRef.current.size)
+          // console.log("📥 CLIENT: Processing", newSuggestions.length, "new suggestions from grammar check")
           
-          // **DUAL-TRACK FILTERING**: Filter by ID first (strongest), then hash (fallback)
-          const filteredSuggestions = newSuggestions.filter(s => {
-            // Primary filter: Check if suggestion ID has been dismissed
-            if (dismissedIdsRef.current.has(s.id)) {
-              console.log(`🚫 Filtering dismissed suggestion by ID: "${s.id}"`);
-              return false; // strongest filter
-            }
-            
-            // Secondary filter: Check if suggestion hash has been dismissed 
-            const hash = createSuggestionHash(s, text);
-            console.log("🔍 CLIENT: Checking suggestion hash:", hash)
-            if (hash && dismissedHashesRef.current.has(hash)) {
-              const suggestionText = s.startOffset !== null && s.endOffset !== null 
-                ? text.substring(s.startOffset, s.endOffset) 
-                : 'unknown text';
-              console.log(`🚫 Filtering dismissed suggestion by hash: "${suggestionText}" with hash: ${hash}`);
-              return false; // fallback filter
-            }
-            
-            return true;
-          })
+          // **CRITICAL FIX**: After grammar check, re-fetch suggestions from database
+          // to ensure dismissed suggestions don't reappear. The database is the source of truth.
+          console.log("🔍 DISMISSAL DEBUG: Grammar check returned", newSuggestions.length, "suggestions, now re-fetching from DB")
+          console.log("🔍 DISMISSAL DEBUG: New suggestions from grammar API:", newSuggestions.map(s => ({id: s.id, text: s.suggestedText})))
           
-          console.log("📥 CLIENT: Setting suggestions state to:", filteredSuggestions.length, "filtered suggestions")
-          // The new list of suggestions from the server is the complete source of truth.
-          // It replaces the previous state entirely.
-          setSuggestions(filteredSuggestions)
+          // Re-sync with database to ensure dismissed suggestions are properly filtered
+          if (documentId) {
+            console.log("🔍 DISMISSAL DEBUG: Calling fetchSuggestions to get filtered results from database")
+            await fetchSuggestions(documentId)
+          }
           
           // Notify parent component that suggestions have been updated
           if (onSuggestionsUpdated) {
-            console.log("📥 CLIENT: Notifying parent of suggestion updates")
+            // console.log("📥 CLIENT: Notifying parent of suggestion updates")
             onSuggestionsUpdated()
           }
         } else {
-          console.log("❌ CLIENT: No valid suggestions in grammar check result:", result.message)
+          // console.log("❌ CLIENT: No valid suggestions in grammar check result:", result.message)
           setSuggestions([])
         }
       } catch (error) {
-        console.error("❌ CLIENT: Grammar check error:", error)
+        // console.error("❌ CLIENT: Grammar check error:", error)
         setSuggestions([])
       } finally {
         setIsCheckingGrammar(false)
         console.log("🏁 CLIENT: Grammar check finished")
       }
     }, 1000), // 1 second debounce delay for faster feedback
-    [createSuggestionHash] // Stable dependencies
+    [fetchSuggestions, documentId, onSuggestionsUpdated] // Updated dependencies
   )
 
   const updateContent = useCallback(() => {
-    console.log("🔵 CLIENT: updateContent called")
+    // console.log("🔵 CLIENT: updateContent called")
     
     if (isUpdatingContentRef.current) {
       console.log("🟡 CLIENT: updateContent skipped - isUpdatingContentRef is true")
@@ -407,20 +347,17 @@ export const EditableContent = forwardRef<
       return
     }
     
-    console.log("🎭 Full update with cursor preservation")
     isUpdatingContentRef.current = true
     const cursorPosition = saveCursorPosition()
     
     // Generate highlighted HTML
     const highlightedHTML = highlightSuggestions(textContent)
-    console.log("🎭 Setting innerHTML to editor")
     editorRef.current.innerHTML = highlightedHTML
     
     // Restore cursor position after a brief delay
     setTimeout(() => {
       restoreCursorPosition(cursorPosition)
       isUpdatingContentRef.current = false
-      console.log("🎭 Cursor position restored")
     }, 0)
   }, [saveCursorPosition, restoreCursorPosition, suggestions])
 
@@ -521,10 +458,7 @@ export const EditableContent = forwardRef<
   }
 
   const highlightSuggestions = (text: string) => {
-    console.log("🖍️ highlightSuggestions called with text length:", text.length, "suggestions count:", suggestions.length)
-    
     if (!suggestions.length) {
-      console.log("🖍️ No suggestions to highlight")
       return text.replace(/\n/g, "<br>")
     }
 
@@ -535,7 +469,6 @@ export const EditableContent = forwardRef<
       (b.startOffset || 0) - (a.startOffset || 0)
     )
 
-    console.log("🖍️ Highlighting", sortedSuggestions.length, "suggestions")
 
     sortedSuggestions.forEach((suggestion, index) => {
       if (suggestion.startOffset !== null && suggestion.endOffset !== null) {
@@ -560,7 +493,6 @@ export const EditableContent = forwardRef<
     })
 
     const result = highlightedText.replace(/\n/g, "<br>")
-    console.log("🖍️ Final highlighted HTML length:", result.length)
     return result
   }
 
@@ -609,13 +541,7 @@ export const EditableContent = forwardRef<
     }
       }, [documentId, fetchSuggestions])
 
-  // Store dismissed IDs in ref to avoid dependency issues  
-  const dismissedIdsRef = useRef<Set<string>>(new Set())
-  
-  // Update dismissed IDs ref when dismissedIds change
-  useEffect(() => {
-    dismissedIdsRef.current = dismissedIds ?? new Set()
-  }, [dismissedIds])
+
 
   // Store suggestions in ref to avoid dependency issues
   const suggestionsRef = useRef<Suggestion[]>([])
@@ -625,76 +551,23 @@ export const EditableContent = forwardRef<
     suggestionsRef.current = suggestions
   }, [suggestions])
 
-  // Process newly dismissed suggestions and store their hashes
-  useEffect(() => {
-    if (!dismissedIds) {
-        return;
-    }
 
-    // --- Generate and store hashes for NEWLY dismissed suggestions ---
-    const newlyRejectedIds = new Set(
-        [...dismissedIds].filter(id => !processedSuggestionIdsRef.current.has(id))
-    );
-
-    if (newlyRejectedIds.size > 0) {
-        // Find the full suggestion objects from the ref (current suggestions state).
-        const suggestionsToDismiss = suggestionsRef.current.filter(s => newlyRejectedIds.has(s.id));
-        console.log("🧹 Suggestions to dismiss:", suggestionsToDismiss.length)
-
-        if (suggestionsToDismiss.length > 0) {
-            // CRITICAL FIX: Use the text from the ref. This text is guaranteed
-            // to match the offsets of the suggestions we are dismissing.
-            const textForHashing = lastCleanTextRef.current;
-            console.log("🧹 Using text for hashing (from ref):", textForHashing.substring(0, 50) + "...");
-
-            const newHashes = suggestionsToDismiss
-                .map(s => createSuggestionHash(s, textForHashing))
-                .filter(hash => hash !== ''); // Filter out any empty hashes
-
-            console.log("🧹 New hashes to store:", newHashes)
-
-            if (newHashes.length > 0) {
-                setDismissedHashes(prevHashes => {
-                    const updatedHashes = new Set([...prevHashes, ...newHashes]);
-                    console.log("🧹 Updated dismissed hashes count:", updatedHashes.size);
-                    return updatedHashes;
-                });
-            }
-        }
-
-        // Update the ref to remember we've processed these IDs.
-        processedSuggestionIdsRef.current = new Set([...processedSuggestionIdsRef.current, ...newlyRejectedIds]);
-    }
-      }, [dismissedIds, createSuggestionHash])
-
-  // Separate effect to filter UI suggestions for immediate feedback
-  useEffect(() => {
-    if (!dismissedIds) {
-        return;
-    }
-
-    // Filter the current UI for ALL dismissed suggestions
-    // This provides immediate feedback by removing the suggestion underline.
-    setSuggestions(prev => prev.filter(s => !dismissedIds.has(s.id)));
-  }, [dismissedIds])
 
   // Update content when suggestions change
   useEffect(() => {
-    console.log("🎨 useEffect[suggestions] triggered - suggestions count:", suggestions.length)
+    
     if (editorRef.current && isInitialized) {
       // Skip if any user input is being processed to avoid using stale content
       if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
-        console.log("🎨 Pending suggestion update due to processing")
         pendingSuggestionUpdateRef.current = true
         return
       }
       
       // Use getCleanTextContent() to get actual current content, not stale textContent
       const currentContent = getCleanTextContent()
-      console.log("🎨 Updating content with suggestions...")
       updateContentWithSuggestions(currentContent, "useEffect[suggestions]")
     } else {
-      console.log("🎨 Skipping suggestion update - editorRef.current:", !!editorRef.current, "isInitialized:", isInitialized)
+      // console.log("🎨 Skipping suggestion update - editorRef.current:", !!editorRef.current, "isInitialized:", isInitialized)
     }
   }, [suggestions, isInitialized, updateContentWithSuggestions, getCleanTextContent])
 

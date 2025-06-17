@@ -216,24 +216,27 @@ export async function checkGrammarWithLanguageToolAction(
     const userUuid = clerkUserIdToUuid(userId)
     console.log("🔧 User UUID:", userUuid)
     
-    // Clear existing unaccepted suggestions for this document before adding new ones
-    console.log("🔧 Clearing existing suggestions...")
+    // Clear existing non-dismissed, unaccepted suggestions for this document before adding new ones
+    // CRITICAL: Don't delete dismissed suggestions or we can't check for duplicates!
+    console.log("🔧 Clearing existing suggestions (preserving dismissed ones)...")
     const deleteResult = await db
       .delete(suggestionsTable)
       .where(
         and(
           eq(suggestionsTable.documentId, documentId),
           eq(suggestionsTable.versionNumber, 1),
-          eq(suggestionsTable.accepted, false)
+          eq(suggestionsTable.accepted, false),
+          eq(suggestionsTable.dismissed, false)  // ONLY delete non-dismissed suggestions
         )
       )
-    console.log("🔧 Cleared existing suggestions")
+    console.log("🔧 Cleared existing suggestions (dismissed suggestions preserved)")
     
     let suggestionsCreated = 0
 
     // Store suggestions in database
     console.log("🔧 Processing", languageToolResponse.matches.length, "matches...")
     for (const match of languageToolResponse.matches) {
+      console.log("🔧 BASIC: Starting to process match:", match.offset, match.length)
       try {
         // Validate match structure
         if (!match || typeof match !== 'object' || 
@@ -245,6 +248,37 @@ export async function checkGrammarWithLanguageToolAction(
           continue
         }
 
+        // Extract the original text from the document that this suggestion is for
+        const originalText = text.substring(match.offset, match.offset + match.length)
+        const suggestedText = match.replacements && match.replacements[0] ? match.replacements[0].value : null
+        
+        console.log(`🔧 DUPLICATE CHECK: Processing suggestion for "${originalText}" -> "${suggestedText}"`)
+
+        // Check if we already have a dismissed suggestion for this exact text + replacement combo
+        console.log(`🔧 DUPLICATE CHECK: Querying for existing dismissed suggestion with originalText="${originalText}", suggestedText="${suggestedText}", documentId="${documentId}"`)
+        
+        const existingDismissedSuggestion = await db
+          .select()
+          .from(suggestionsTable)
+          .where(
+            and(
+              eq(suggestionsTable.documentId, documentId),
+              eq(suggestionsTable.originalText, originalText),
+              eq(suggestionsTable.suggestedText, suggestedText || ''),
+              eq(suggestionsTable.dismissed, true)
+            )
+          )
+          .limit(1)
+
+        console.log(`🔧 DUPLICATE CHECK: Found ${existingDismissedSuggestion.length} existing dismissed suggestions`)
+        if (existingDismissedSuggestion.length > 0) {
+          console.log(`🔧 DUPLICATE CHECK: Existing dismissed suggestion:`, existingDismissedSuggestion[0])
+          console.log(`🔧 SKIP: Found existing dismissed suggestion for "${originalText}" -> "${suggestedText}", not creating duplicate`)
+          continue
+        } else {
+          console.log(`🔧 DUPLICATE CHECK: No existing dismissed suggestion found, will create new one`)
+        }
+
         const suggestionType = match.type.typeName.toLowerCase().includes('spell') ? 'spelling' : 'grammar'
         console.log(`🔧 Creating suggestion ${suggestionsCreated + 1}: ${suggestionType} - "${match.message}" at offset ${match.offset}-${match.offset + match.length}`)
         
@@ -253,7 +287,8 @@ export async function checkGrammarWithLanguageToolAction(
           .values({
             documentId,
             versionNumber: 1, // Using version 1 since we're not doing versioning
-            suggestedText: match.replacements && match.replacements[0] ? match.replacements[0].value : null,
+            originalText: originalText, // Store the original text that this suggestion is for
+            suggestedText: suggestedText,
             explanation: match.message,
             startOffset: match.offset,
             endOffset: match.offset + match.length,
@@ -288,7 +323,8 @@ export async function checkGrammarWithLanguageToolAction(
         and(
           eq(suggestionsTable.documentId, documentId),
           eq(suggestionsTable.versionNumber, 1),
-          eq(suggestionsTable.accepted, false)
+          eq(suggestionsTable.accepted, false),
+          eq(suggestionsTable.dismissed, false)  // Don't return dismissed suggestions
         )
       )
 

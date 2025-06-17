@@ -216,22 +216,26 @@ export async function checkGrammarWithLanguageToolAction(
     const userUuid = clerkUserIdToUuid(userId)
     console.log("🔧 User UUID:", userUuid)
     
-    // Clear existing non-dismissed, unaccepted suggestions for this document before adding new ones
-    // CRITICAL: Don't delete dismissed suggestions or we can't check for duplicates!
-    console.log("🔧 Clearing existing suggestions (preserving dismissed ones)...")
-    const deleteResult = await db
-      .delete(suggestionsTable)
+    // Get existing suggestions to check what needs to be updated vs created
+    console.log("🔧 Fetching existing suggestions for smart merge...")
+    const existingSuggestions = await db
+      .select()
+      .from(suggestionsTable)
       .where(
         and(
           eq(suggestionsTable.documentId, documentId),
           eq(suggestionsTable.versionNumber, 1),
           eq(suggestionsTable.accepted, false),
-          eq(suggestionsTable.dismissed, false)  // ONLY delete non-dismissed suggestions
+          eq(suggestionsTable.dismissed, false)
         )
       )
-    console.log("🔧 Cleared existing suggestions (dismissed suggestions preserved)")
     
+    console.log("🔧 Found", existingSuggestions.length, "existing active suggestions")
+    
+    // Track which existing suggestions are still valid (will be updated at the end)
+    const validExistingSuggestionIds = new Set<string>()
     let suggestionsCreated = 0
+    let suggestionsUpdated = 0
 
     // Store suggestions in database
     console.log("🔧 Processing", languageToolResponse.matches.length, "matches...")
@@ -252,10 +256,6 @@ export async function checkGrammarWithLanguageToolAction(
         const originalText = text.substring(match.offset, match.offset + match.length)
         const suggestedText = match.replacements && match.replacements[0] ? match.replacements[0].value : null
         
-        console.log(`🔧 DUPLICATE CHECK: Processing suggestion for "${originalText}" -> "${suggestedText}"`)
-
-        // Check if we already have a dismissed suggestion for this text/position
-        console.log(`🔧 DUPLICATE CHECK: Querying for existing dismissed suggestion with originalText="${originalText}", suggestedText="${suggestedText}", documentId="${documentId}"`)
         
         // DEBUG: Let's see all dismissed suggestions for this document first
         const allDismissedForDoc = await db
@@ -268,16 +268,8 @@ export async function checkGrammarWithLanguageToolAction(
             )
           )
         
-        console.log(`🔧 DUPLICATE DEBUG: Found ${allDismissedForDoc.length} total dismissed suggestions for document:`)
-        allDismissedForDoc.forEach((dismissed, i) => {
-          console.log(`🔧 DUPLICATE DEBUG: Dismissed ${i}:`, {
-            id: dismissed.id,
-            originalText: dismissed.originalText,
-            suggestedText: dismissed.suggestedText,
-            startOffset: dismissed.startOffset,
-            endOffset: dismissed.endOffset
-          })
-        })
+        
+        
         
         // First try exact match (current logic)
         let existingDismissedSuggestion = await db
@@ -293,27 +285,21 @@ export async function checkGrammarWithLanguageToolAction(
           )
           .limit(1)
         
-        console.log(`🔧 DUPLICATE DEBUG: Exact match query for originalText="${originalText}", suggestedText="${suggestedText}" returned ${existingDismissedSuggestion.length} results`)
+        
 
         // If no exact match, check for dismissed suggestions in similar position range
         // This handles cases where text might have changed slightly
         if (existingDismissedSuggestion.length === 0) {
-          console.log(`🔧 DUPLICATE CHECK: No exact match found, checking position-based duplicates...`)
+          
           
           const positionTolerance = 10 // Allow 10 character tolerance
           
-          console.log(`🔧 DUPLICATE DEBUG: Current match details:`, {
-            originalText: originalText,
-            suggestedText: suggestedText,
-            startOffset: match.offset,
-            endOffset: match.offset + match.length,
-            matchType: match.type?.typeName
-          })
+          
 
           // Check if any dismissed suggestion overlaps with current position
           existingDismissedSuggestion = allDismissedForDoc.filter(dismissed => {
             if (dismissed.startOffset === null || dismissed.endOffset === null) {
-              console.log(`🔧 DUPLICATE DEBUG: Skipping dismissed suggestion ${dismissed.id} - null offsets`)
+              // console.log(`🔧 DUPLICATE DEBUG: Skipping dismissed suggestion ${dismissed.id} - null offsets`)
               return false
             }
             
@@ -333,73 +319,117 @@ export async function checkGrammarWithLanguageToolAction(
             // Check if suggested text matches
             const isSameSuggestion = dismissed.suggestedText === suggestedText
             
-            console.log(`🔧 DUPLICATE DEBUG: Checking dismissed suggestion ${dismissed.id}:`, {
-              dismissedOriginal: dismissed.originalText,
-              dismissedSuggested: dismissed.suggestedText,
-              dismissedPosition: `${dismissedStart}-${dismissedEnd}`,
-              currentOriginal: originalText,
-              currentSuggested: suggestedText,
-              currentPosition: `${currentStart}-${currentEnd}`,
-              hasOverlap,
-              isSimilarText,
-              isSameSuggestion,
-              shouldSkip: hasOverlap || isSimilarText || isSameSuggestion
-            })
+            
             
             if (hasOverlap || isSimilarText || isSameSuggestion) {
-              console.log(`🔧 DUPLICATE CHECK: Found position-based match - will skip creating suggestion`)
+              
               return true
             }
             return false
           })
         }
 
-        console.log(`🔧 DUPLICATE CHECK: Found ${existingDismissedSuggestion.length} existing dismissed suggestions`)
+        
         if (existingDismissedSuggestion.length > 0) {
-          console.log(`🔧 DUPLICATE CHECK: Existing dismissed suggestion:`, existingDismissedSuggestion[0])
-          console.log(`🔧 SKIP: Found existing dismissed suggestion for "${originalText}" -> "${suggestedText}", not creating duplicate`)
           continue
-        } else {
-          console.log(`🔧 DUPLICATE CHECK: No existing dismissed suggestion found, will create new one`)
         }
 
         const suggestionType = match.type.typeName.toLowerCase().includes('spell') ? 'spelling' : 'grammar'
-        console.log(`🔧 Creating suggestion ${suggestionsCreated + 1}: ${suggestionType} - "${match.message}" at offset ${match.offset}-${match.offset + match.length}`)
         
-        await db
-          .insert(suggestionsTable)
-          .values({
-            documentId,
-            versionNumber: 1, // Using version 1 since we're not doing versioning
-            originalText: originalText, // Store the original text that this suggestion is for
-            suggestedText: suggestedText,
-            explanation: match.message,
-            startOffset: match.offset,
-            endOffset: match.offset + match.length,
-            suggestionType: suggestionType as "grammar" | "spelling",
-            confidence: "0.8", // Default confidence
-            accepted: false
-          })
+        // Check if an existing suggestion matches this match (same position and content)
+        const matchingExistingSuggestion = existingSuggestions.find(existing => 
+          existing.startOffset === match.offset &&
+          existing.endOffset === match.offset + match.length &&
+          existing.originalText === originalText &&
+          existing.suggestedText === suggestedText
+        )
         
-        suggestionsCreated++
-        console.log(`🔧 Suggestion ${suggestionsCreated} created successfully`)
+        if (matchingExistingSuggestion) {
+          // This suggestion already exists and is still valid - mark it to keep
+          validExistingSuggestionIds.add(matchingExistingSuggestion.id)
+          console.log(`🔧 PRESERVING existing suggestion ${matchingExistingSuggestion.id} (position: ${match.offset}-${match.offset + match.length}) - text: "${originalText}" -> "${suggestedText}"`)
+          
+          // Optionally update explanation if it has changed
+          if (matchingExistingSuggestion.explanation !== match.message) {
+            await db
+              .update(suggestionsTable)
+              .set({ explanation: match.message })
+              .where(eq(suggestionsTable.id, matchingExistingSuggestion.id))
+            suggestionsUpdated++
+            console.log(`🔧 Updated explanation for suggestion ${matchingExistingSuggestion.id}`)
+          }
+        } else {
+          // Create new suggestion
+          console.log(`🔧 NO MATCH found for position ${match.offset}-${match.offset + match.length}, text: "${originalText}" -> "${suggestedText}"`)
+          console.log(`🔧 Available existing suggestions:`, existingSuggestions.map(s => ({
+            id: s.id.substring(0, 8),
+            startOffset: s.startOffset,
+            endOffset: s.endOffset,
+            originalText: s.originalText,
+            suggestedText: s.suggestedText
+          })))
+          
+          await db
+            .insert(suggestionsTable)
+            .values({
+              documentId,
+              versionNumber: 1, // Using version 1 since we're not doing versioning
+              originalText: originalText, // Store the original text that this suggestion is for
+              suggestedText: suggestedText,
+              explanation: match.message,
+              startOffset: match.offset,
+              endOffset: match.offset + match.length,
+              suggestionType: suggestionType as "grammar" | "spelling",
+              confidence: "0.8", // Default confidence
+              accepted: false
+            })
+          
+          suggestionsCreated++
+          console.log(`🔧 CREATED new suggestion ${suggestionsCreated} (position: ${match.offset}-${match.offset + match.length}) - text: "${originalText}" -> "${suggestedText}"`)
+        }
       } catch (error) {
         console.error("Error storing suggestion:", error)
         // Continue with other suggestions even if one fails
       }
     }
 
+    // Clean up existing suggestions that are no longer valid
+    const obsoleteSuggestionIds = existingSuggestions
+      .filter(existing => !validExistingSuggestionIds.has(existing.id))
+      .map(existing => existing.id)
+    
+    let suggestionsDeleted = 0
+    if (obsoleteSuggestionIds.length > 0) {
+      console.log(`🔧 Removing ${obsoleteSuggestionIds.length} obsolete suggestions:`, obsoleteSuggestionIds)
+      // Delete each obsolete suggestion specifically
+      for (const obsoleteSuggestionId of obsoleteSuggestionIds) {
+        try {
+          await db
+            .delete(suggestionsTable)
+            .where(eq(suggestionsTable.id, obsoleteSuggestionId))
+          suggestionsDeleted++
+        } catch (error) {
+          console.error(`🔧 Failed to delete obsolete suggestion ${obsoleteSuggestionId}:`, error)
+        }
+      }
+      console.log(`🔧 Deleted ${suggestionsDeleted} obsolete suggestions`)
+    } else {
+      console.log("🔧 No obsolete suggestions to remove")
+    }
+
+    console.log(`🔧 Smart merge complete: ${suggestionsCreated} created, ${suggestionsUpdated} updated, ${suggestionsDeleted} deleted, ${validExistingSuggestionIds.size} preserved`)
+
     // Log analytics event for grammar check
-    console.log("🔧 Logging analytics event...")
+    
     try {
       await logGrammarCheckAction(documentId, text.length, suggestionsCreated)
-      console.log("🔧 Analytics event logged successfully")
+    
     } catch (error) {
-      console.error("🔧 Failed to log grammar check analytics:", error)
+      // console.error("🔧 Failed to log grammar check analytics:", error)
     }
 
     // Fetch the suggestions we just created to return them
-    console.log("🔧 Fetching created suggestions to return...")
+    
     const createdSuggestions = await db
       .select()
       .from(suggestionsTable)
@@ -412,7 +442,7 @@ export async function checkGrammarWithLanguageToolAction(
         )
       )
 
-    console.log(`🔧 Grammar check completed successfully! Created ${suggestionsCreated} suggestions, returning ${createdSuggestions.length} suggestions`)
+    
     return {
       isSuccess: true,
       message: `Grammar check completed. ${suggestionsCreated} suggestions found.`,
@@ -420,7 +450,7 @@ export async function checkGrammarWithLanguageToolAction(
     }
 
   } catch (error) {
-    console.error("🔧 Error checking grammar with LanguageTool:", error)
+    
     return {
       isSuccess: false,
       message: "Failed to check grammar"

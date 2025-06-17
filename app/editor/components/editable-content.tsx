@@ -64,6 +64,7 @@ interface EditableContentProps {
   onSuggestionClick?: (suggestion: Suggestion) => void
   onSuggestionsUpdated?: () => void
   suggestions?: Suggestion[] // Add suggestions as props
+  isAcceptingSuggestion?: boolean // Add lock state to prevent concurrent operations
 }
 
 interface FormatState {
@@ -175,13 +176,13 @@ const slateToHtml = (nodes: Descendant[]): string => {
 export const EditableContent = forwardRef<
   EditableContentRef,
   EditableContentProps
->(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, suggestions: propSuggestions = [] }, ref) => {
+>(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, suggestions: propSuggestions = [], isAcceptingSuggestion = false }, ref) => {
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
-  
+
   // Use suggestions from props instead of internal state
   const suggestions = propSuggestions
-  
+
   // Debug prop suggestions
   useEffect(() => {
     console.log(`🎨 PROPS: Received ${suggestions.length} suggestions from parent:`, 
@@ -200,6 +201,32 @@ export const EditableContent = forwardRef<
     return htmlToSlate(initialContent)
   })
 
+  // Force Slate to re-render decorations when suggestions change
+  useEffect(() => {
+    // Only force re-render if we have content and suggestions
+    if (value.length > 0 && (suggestions.length > 0 || loadingSuggestions)) {
+      console.log(`🎨 SLATE: Forcing editor re-render due to suggestions change (${suggestions.length} suggestions)`)
+      
+      // Use a more targeted approach - just trigger onChange to refresh decorations
+      try {
+        const currentSelection = editor.selection
+        editor.onChange()
+        
+        // Restore selection if it existed and is still valid
+        if (currentSelection && Range.isRange(currentSelection)) {
+          try {
+            Transforms.select(editor, currentSelection)
+          } catch (e) {
+            // Selection might be invalid after content changes, ignore
+            console.log('🎨 SLATE: Could not restore selection, continuing...')
+          }
+        }
+      } catch (error) {
+        console.error('🎨 SLATE: Error forcing editor re-render:', error)
+      }
+    }
+  }, [suggestions, editor, value, loadingSuggestions])
+
   // Update editor when initialContent changes (e.g., when suggestion is accepted)
   useEffect(() => {
     if (initialContent) {
@@ -212,7 +239,6 @@ export const EditableContent = forwardRef<
   const debouncedGrammarCheck = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
-        console.log("🚀 SLATE: debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
         setIsCheckingGrammar(true)
         
         const result = await checkGrammarWithLanguageToolAction(text, docId)
@@ -230,7 +256,6 @@ export const EditableContent = forwardRef<
         console.error("❌ SLATE: Grammar check error:", error)
       } finally {
         setIsCheckingGrammar(false)
-        console.log("🏁 SLATE: Grammar check finished")
       }
     }, 1000),
     [onSuggestionsUpdated]
@@ -246,15 +271,16 @@ export const EditableContent = forwardRef<
     // Convert to HTML for saving (preserve formatting)
     const htmlContent = slateToHtml(newValue)
     
-    console.log("🟢 SLATE: Content changed - text length:", plainText.length)
+    
     onContentChange(htmlContent)
     
-    // Trigger grammar check
-    if (documentId && plainText.trim()) {
-      console.log("🟢 SLATE: Triggering debouncedGrammarCheck")
+    // Trigger grammar check (but skip if accepting a suggestion to avoid race conditions)
+    if (documentId && plainText.trim() && !isAcceptingSuggestion) {
       debouncedGrammarCheck(plainText, documentId)
+    } else if (isAcceptingSuggestion) {
+      console.log("🔄 SLATE: Skipping grammar check - currently accepting a suggestion")
     }
-  }, [onContentChange, documentId, debouncedGrammarCheck])
+  }, [onContentChange, documentId, debouncedGrammarCheck, isAcceptingSuggestion])
 
   // Create decorations for suggestions
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -287,36 +313,59 @@ export const EditableContent = forwardRef<
       }
     }
 
-    suggestions.forEach((suggestion) => {
-      if (suggestion.startOffset == null || suggestion.endOffset == null) {
-        return
-      }
+         suggestions.forEach((suggestion) => {
+       if (suggestion.startOffset == null || suggestion.endOffset == null) {
+         return
+       }
 
-      const suggestionStart = suggestion.startOffset
-      const suggestionEnd = suggestion.endOffset
-      
-      // Check if this suggestion overlaps with this text node
-      const nodeStart = textOffset
-      const nodeEnd = textOffset + nodeText.length
-      
-      if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
-        // Calculate the range within this text node
-        const rangeStart = Math.max(0, suggestionStart - nodeStart)
-        const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
-        
-        if (rangeStart < rangeEnd) {
-          console.log(`🎨 SLATE: Adding decoration for suggestion ${suggestion.id} at ${rangeStart}-${rangeEnd} in node`)
-          
-          ranges.push({
-            anchor: { path, offset: rangeStart },
-            focus: { path, offset: rangeEnd },
-            suggestion: true,
-            suggestionId: suggestion.id,
-            title: suggestion.explanation || 'Click for suggestion'
-          })
-        }
-      }
-    })
+       const suggestionStart = suggestion.startOffset
+       const suggestionEnd = suggestion.endOffset
+       
+       // SAFETY CHECK: Verify the suggestion offsets are still valid for current text
+       if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
+         console.log(`🎨 SLATE: Skipping suggestion ${suggestion.id} - invalid offsets for current text`, {
+           suggestionStart,
+           suggestionEnd,
+           textLength: fullText.length,
+           originalText: suggestion.originalText,
+           currentTextAtOffset: fullText.substring(suggestionStart, suggestionEnd)
+         })
+         return
+       }
+
+       // Additional check: verify the text at the offset still matches what we expect
+       const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
+       if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
+         console.log(`🎨 SLATE: Skipping suggestion ${suggestion.id} - text mismatch`, {
+           expected: suggestion.originalText,
+           actual: currentTextAtOffset,
+           offsets: `${suggestionStart}-${suggestionEnd}`
+         })
+         return
+       }
+       
+       // Check if this suggestion overlaps with this text node
+       const nodeStart = textOffset
+       const nodeEnd = textOffset + nodeText.length
+       
+       if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
+         // Calculate the range within this text node
+         const rangeStart = Math.max(0, suggestionStart - nodeStart)
+         const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
+         
+         if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
+           
+           
+           ranges.push({
+             anchor: { path, offset: rangeStart },
+             focus: { path, offset: rangeEnd },
+             suggestion: true,
+             suggestionId: suggestion.id,
+             title: suggestion.explanation || 'Click for suggestion'
+           })
+         }
+       }
+     })
 
     return ranges
   }, [suggestions, value, editor])
@@ -339,9 +388,9 @@ export const EditableContent = forwardRef<
   // Handle keyboard shortcuts for formatting
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (!event.ctrlKey && !event.metaKey) {
-      return
-    }
-
+        return
+      }
+      
     switch (event.key) {
       case 'b':
         event.preventDefault()
@@ -360,11 +409,19 @@ export const EditableContent = forwardRef<
 
   // Accept suggestion by replacing text in the editor
   const acceptSuggestion = useCallback((suggestion: Suggestion) => {
+    console.log("🎯 SLATE: acceptSuggestion called with:", {
+      id: suggestion.id,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset,
+      suggestedText: suggestion.suggestedText,
+      originalText: suggestion.originalText
+    })
+    
     if (suggestion.startOffset == null || suggestion.endOffset == null || !suggestion.suggestedText) {
-      console.error("Invalid suggestion data for acceptance:", suggestion)
-      return
-    }
-
+      console.error("🎯 SLATE: Invalid suggestion data for acceptance:", suggestion)
+        return
+      }
+      
     console.log("🎯 SLATE: Accepting suggestion:", {
       id: suggestion.id,
       startOffset: suggestion.startOffset,
@@ -414,7 +471,8 @@ export const EditableContent = forwardRef<
         startOffset: suggestion.startOffset,
         endOffset: suggestion.endOffset,
         mappingLength: offsetToPosition.length,
-        textLength: fullText.length
+        textLength: fullText.length,
+        availableOffsets: Object.keys(offsetToPosition).slice(0, 10) // Show first 10 for debugging
       })
       return
     }
@@ -439,7 +497,7 @@ export const EditableContent = forwardRef<
       Transforms.select(editor, range)
       Transforms.insertText(editor, suggestion.suggestedText)
 
-      console.log("🎯 SLATE: Successfully replaced text")
+      console.log("🎯 SLATE: Successfully replaced text - new content:", slateToText(editor.children))
 
     } catch (error) {
       console.error("🎯 SLATE: Error during text replacement:", error)
@@ -447,27 +505,35 @@ export const EditableContent = forwardRef<
   }, [editor, value])
 
   // Expose methods via ref
-  useImperativeHandle(ref, () => ({
-    formatText: (command: string) => {
-      ReactEditor.focus(editor)
-      // Implement formatting commands
-      console.log("Format command:", command)
-    },
-    toggleBulletList: () => {
-      ReactEditor.focus(editor)
-      // Implement bullet list toggle
-      console.log("Toggle bullet list")
-    },
-    toggleNumberedList: () => {
-      ReactEditor.focus(editor)
-      // Implement numbered list toggle
-      console.log("Toggle numbered list")
-    },
-    focus: () => {
-      ReactEditor.focus(editor)
-    },
-    acceptSuggestion: acceptSuggestion
-  }), [editor, acceptSuggestion])
+  useImperativeHandle(ref, () => {
+    console.log("🎯 SLATE: Creating ref interface with acceptSuggestion method")
+    const refInterface = {
+      formatText: (command: string) => {
+        ReactEditor.focus(editor)
+        // Implement formatting commands
+        console.log("Format command:", command)
+      },
+      toggleBulletList: () => {
+        ReactEditor.focus(editor)
+        // Implement bullet list toggle
+        console.log("Toggle bullet list")
+      },
+      toggleNumberedList: () => {
+        ReactEditor.focus(editor)
+        // Implement numbered list toggle
+        console.log("Toggle numbered list")
+      },
+      focus: () => {
+        ReactEditor.focus(editor)
+      },
+      acceptSuggestion: (suggestion: Suggestion) => {
+        console.log("🎯 SLATE: acceptSuggestion called via ref with:", suggestion.id)
+        return acceptSuggestion(suggestion)
+      }
+    }
+    console.log("🎯 SLATE: Returning ref interface:", Object.keys(refInterface))
+    return refInterface
+  }, [editor, acceptSuggestion])
 
   // Update format state (simplified for now)
   useEffect(() => {

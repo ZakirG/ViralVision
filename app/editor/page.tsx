@@ -8,6 +8,7 @@ import {
   Target,
   BarChart3,
   ChevronRight,
+  ChevronLeft,
   Sparkles,
   Info,
   MoreHorizontal,
@@ -41,7 +42,8 @@ import {
 } from "@/actions/db/documents-actions"
 import { 
   getSuggestionsByDocumentIdAction, 
-  dismissSuggestionAction 
+  dismissSuggestionAction,
+  acceptSuggestionAction
 } from "@/actions/db/suggestions-actions"
 import { 
   logSuggestionAcceptedAction, 
@@ -86,6 +88,7 @@ export default function GrammarlyEditor() {
   const [selectedSuggestionForPanel, setSelectedSuggestionForPanel] = useState<Suggestion | null>(null)
   const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
   const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
+  const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -260,26 +263,65 @@ export default function GrammarlyEditor() {
 
   // Suggestion handling functions
   const handleSuggestionClick = useCallback((suggestion: Suggestion) => {
+    console.log("🎯 PARENT: Suggestion clicked:", {
+      id: suggestion.id,
+      text: suggestion.suggestedText,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset,
+      isInCurrentList: realSuggestions.some(s => s.id === suggestion.id),
+      currentListCount: realSuggestions.length,
+      currentListIds: realSuggestions.map(s => s.id)
+    })
+    
     setSelectedSuggestionForPanel(suggestion)
     setSuggestionPanelOpen(true)
-  }, [])
+  }, [realSuggestions])
 
   const refreshSuggestions = useCallback(async () => {
     if (!documentId) return
     
+    // Prevent refreshing while accepting a suggestion to avoid race conditions
+    if (isAcceptingSuggestion) {
+      console.log("🔄 PARENT: Skipping refreshSuggestions - currently accepting a suggestion")
+      return
+    }
+    
+    console.log("🔄 PARENT: refreshSuggestions called for documentId:", documentId)
+    
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
       if (result.isSuccess && result.data) {
+        console.log("🔄 PARENT: Retrieved", result.data.length, "suggestions from DB:", 
+          result.data.map(s => ({ id: s.id, text: s.suggestedText })))
+        
         // Database query already filters out accepted and dismissed suggestions
-        setRealSuggestions(result.data)
+        setRealSuggestions(prev => {
+          console.log("🔄 PARENT: UPDATING realSuggestions:", {
+            previousCount: prev.length,
+            previousIds: prev.map(s => s.id),
+            newCount: result.data.length,
+            newIds: result.data.map(s => s.id),
+            idsChanged: !prev.every(p => result.data.some(n => n.id === p.id)) || prev.length !== result.data.length
+          })
+          return result.data
+        })
+        console.log("🔄 PARENT: Updated realSuggestions state with", result.data.length, "suggestions")
+      } else {
+        console.log("🔄 PARENT: refreshSuggestions failed or no data:", result)
       }
     } catch (error) {
-      console.error("Error refreshing suggestions:", error)
+      console.error("🔄 PARENT: Error refreshing suggestions:", error)
     }
-  }, [documentId])
+  }, [documentId, isAcceptingSuggestion])
 
   const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
-    if (!suggestion.startOffset || !suggestion.endOffset || !suggestion.suggestedText) {
+    // Prevent concurrent suggestion acceptance
+    if (isAcceptingSuggestion) {
+      console.log("🎯 PARENT: Already accepting a suggestion, ignoring this request")
+      return
+    }
+
+    if (suggestion.startOffset == null || suggestion.endOffset == null || !suggestion.suggestedText) {
       toast({
         title: "Error",
         description: "Unable to apply suggestion - missing required data",
@@ -288,17 +330,92 @@ export default function GrammarlyEditor() {
       return
     }
 
+    // Check if the suggestion is still in our current suggestions list
+    console.log("🎯 PARENT: Validating suggestion before accept:", {
+      suggestionId: suggestion.id,
+      suggestionText: suggestion.suggestedText,
+      currentSuggestionsCount: realSuggestions.length,
+      currentSuggestionIds: realSuggestions.map(s => s.id),
+      currentSuggestionTexts: realSuggestions.map(s => s.suggestedText)
+    })
+    
+    const isStillValid = realSuggestions.some(s => s.id === suggestion.id)
+    if (!isStillValid) {
+      console.log("🎯 PARENT: Suggestion no longer valid (not in current list), BUT PROCEEDING ANYWAY FOR DEBUGGING")
+      console.log("🎯 PARENT: Attempted suggestion:", { id: suggestion.id, text: suggestion.suggestedText })
+      console.log("🎯 PARENT: Current suggestions:", realSuggestions.map(s => ({ id: s.id, text: s.suggestedText })))
+      
+      // TEMPORARILY DISABLED - let's see if the database action still works
+      // toast({
+      //   title: "Suggestion Outdated",
+      //   description: "This suggestion has been updated. Please try again with the latest suggestions.",
+      //   variant: "destructive"
+      // })
+      // refreshSuggestions()
+      // return
+    }
+
     console.log("🎯 PARENT: Accepting suggestion via editor:", {
       id: suggestion.id,
       text: suggestion.suggestedText
     })
 
+    // Set lock to prevent concurrent operations
+    setIsAcceptingSuggestion(true)
+
     // Use the editor's acceptSuggestion method for better handling
+    console.log("🎯 PARENT: Checking editorRef.current:", {
+      exists: !!editorRef.current,
+      hasAcceptSuggestion: editorRef.current && typeof editorRef.current.acceptSuggestion === 'function',
+      refMethods: editorRef.current ? Object.keys(editorRef.current) : 'ref is null'
+    })
+    
     if (editorRef.current) {
       try {
-        editorRef.current.acceptSuggestion(suggestion)
+        // STEP 1: Mark suggestion as accepted in database to prevent reappearance
+        console.log("🎯 PARENT: Marking suggestion as accepted in database first")
+        const acceptResult = await acceptSuggestionAction(suggestion.id)
         
-        // Log analytics event
+        console.log("🎯 PARENT: acceptSuggestionAction result:", {
+          isSuccess: acceptResult.isSuccess,
+          message: acceptResult.message,
+          data: acceptResult.data
+        })
+        
+        if (!acceptResult.isSuccess) {
+          console.error("🎯 PARENT: Database accept failed:", acceptResult.message)
+          console.log("🎯 PARENT: Current suggestions in UI:", realSuggestions.map(s => ({ id: s.id, text: s.suggestedText })))
+          console.log("🎯 PARENT: Attempted to accept suggestion:", { id: suggestion.id, text: suggestion.suggestedText })
+          
+          toast({
+            title: "Error",
+            description: "Failed to mark suggestion as accepted. This suggestion may have been updated. Please try again.",
+            variant: "destructive"
+          })
+          setIsAcceptingSuggestion(false) // Clear lock
+          return
+        }
+        
+        console.log("🎯 PARENT: Database accept successful, proceeding to text replacement")
+        
+        // STEP 2: Remove the suggestion from local state to prevent highlighting issues
+        setRealSuggestions(prev => {
+          const filtered = prev.filter(s => s.id !== suggestion.id)
+          console.log(`🎯 PARENT: Pre-emptively removed suggestion from state: ${prev.length} -> ${filtered.length}`)
+          return filtered
+        })
+        
+        // STEP 3: Now perform the text replacement
+        console.log("🎯 PARENT: About to call editorRef.current.acceptSuggestion with:", {
+          suggestionId: suggestion.id,
+          suggestionText: suggestion.suggestedText,
+          startOffset: suggestion.startOffset,
+          endOffset: suggestion.endOffset
+        })
+        editorRef.current.acceptSuggestion(suggestion)
+        console.log("🎯 PARENT: Called editorRef.current.acceptSuggestion, no exception thrown")
+        
+        // STEP 4: Log analytics event
         if (documentId) {
           await logSuggestionAcceptedAction(
             suggestion.id,
@@ -306,13 +423,6 @@ export default function GrammarlyEditor() {
             documentId
           )
         }
-        
-        // Remove the accepted suggestion from the list immediately
-        setRealSuggestions(prev => {
-          const filtered = prev.filter(s => s.id !== suggestion.id)
-          console.log(`🎯 PARENT: Updated suggestions from ${prev.length} to ${filtered.length}`)
-          return filtered
-        })
         
         // Show success message
         toast({
@@ -325,6 +435,9 @@ export default function GrammarlyEditor() {
           refreshSuggestions()
         }, 500)
         
+        // Clear lock after successful operation
+        setIsAcceptingSuggestion(false)
+        
       } catch (error) {
         console.error("Failed to apply suggestion:", error)
         toast({
@@ -332,6 +445,7 @@ export default function GrammarlyEditor() {
           description: "Failed to apply suggestion. Please try again.",
           variant: "destructive"
         })
+        setIsAcceptingSuggestion(false) // Clear lock
       }
     } else {
       toast({
@@ -339,8 +453,9 @@ export default function GrammarlyEditor() {
         description: "Editor not available. Please try again.",
         variant: "destructive"
       })
+      setIsAcceptingSuggestion(false) // Clear lock
     }
-  }, [documentId, refreshSuggestions])
+  }, [documentId, refreshSuggestions, isAcceptingSuggestion])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
     console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {
@@ -401,6 +516,15 @@ export default function GrammarlyEditor() {
     setSuggestionPanelOpen(false)
     setSelectedSuggestionForPanel(null)
   }, [])
+
+  // Protected suggestion update callback that respects the acceptance lock
+  const handleSuggestionsUpdated = useCallback(() => {
+    if (isAcceptingSuggestion) {
+      console.log("🔄 PARENT: Skipping onSuggestionsUpdated callback - currently accepting a suggestion")
+    } else {
+      refreshSuggestions()
+    }
+  }, [isAcceptingSuggestion, refreshSuggestions])
 
   // Fetch suggestions when document loads or rejected suggestions change
   useEffect(() => {
@@ -560,7 +684,8 @@ export default function GrammarlyEditor() {
                 documentId={documentId || undefined}
                 onSuggestionClick={handleSuggestionClick}
                 suggestions={suggestions}
-                onSuggestionsUpdated={refreshSuggestions}
+                onSuggestionsUpdated={handleSuggestionsUpdated}
+                isAcceptingSuggestion={isAcceptingSuggestion}
               />
             </div>
           </div>
@@ -716,21 +841,9 @@ export default function GrammarlyEditor() {
           className="size-12 rounded-full border-2 border-gray-400 bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
         >
           {rightPanelCollapsed ? (
-            <ChevronRight className="size-8 text-gray-700" />
+            <ChevronLeft className="size-8 text-gray-700" />
           ) : (
-            <svg
-              className="size-8 text-gray-700"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={3}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
+            <ChevronRight className="size-8 text-gray-700" />
           )}
         </Button>
       </div>

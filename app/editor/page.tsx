@@ -622,11 +622,11 @@ export default function GrammarlyEditor() {
           </div>
 
           <div className="flex items-center gap-2">
-            {saving ? (
+            {/* {saving ? (
               <span className="text-sm text-gray-500">Saving...</span>
             ) : (
               <span className="text-sm text-gray-400">Saved</span>
-            )}
+            )} */}
             <Button variant="outline" size="sm" onClick={handleSave}>
               Save
             </Button>
@@ -944,7 +944,7 @@ export default function GrammarlyEditor() {
                 </div>
 
                 {/* Suggestions list */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto min-h-0">
                   {suggestions.length === 0 ? (
                     <div className="flex items-center justify-center p-8">
                       <div className="text-center">

@@ -181,6 +181,7 @@ export const EditableContent = forwardRef<
 >(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, suggestions: propSuggestions = [], isAcceptingSuggestion = false }, ref) => {
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+  const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
 
   // Use suggestions from props instead of internal state
   const suggestions = propSuggestions
@@ -286,12 +287,19 @@ export const EditableContent = forwardRef<
     [onSuggestionsUpdated]
   )
 
-  // New OpenRouter-based grammar checking with longer delay
+  // New OpenRouter-based grammar checking with faster delay
   const debouncedGrammarCheckWithAI = useCallback(
     debounce(async (text: string, docId: string) => {
+      // Skip if already checking grammar to prevent overlapping requests
+      if (isGrammarCheckInProgress) {
+        console.log("🤖 SLATE: Grammar check already in progress, skipping...")
+        return
+      }
+
       try {
+        setIsGrammarCheckInProgress(true)
         setIsCheckingGrammar(true)
-        console.log("🤖🤖🤖 SLATE: CALLING OPENROUTER AI GRAMMAR CHECK 🤖🤖🤖")
+        console.log("🤖🤖🤖 SLATE: CALLING OPENROUTER AI GRAMMAR CHECK (debounced) 🤖🤖🤖")
         console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
         console.log("🤖 SLATE: Document ID:", docId)
         
@@ -310,10 +318,45 @@ export const EditableContent = forwardRef<
         console.error("❌ SLATE: AI grammar check error:", error)
       } finally {
         setIsCheckingGrammar(false)
+        setIsGrammarCheckInProgress(false)
       }
-    }, 3000), // Longer delay for AI grammar checks (3 seconds)
-    [onSuggestionsUpdated]
+    }, 1000), // Faster delay for AI grammar checks (1 second)
+    [onSuggestionsUpdated, isGrammarCheckInProgress]
   )
+
+  // Immediate grammar check for punctuation triggers (period, newline)
+  const immediateGrammarCheck = useCallback(async (text: string, docId: string, trigger: string) => {
+    // Skip if already checking grammar to prevent overlapping requests
+    if (isGrammarCheckInProgress) {
+      console.log(`🤖 SLATE: Grammar check already in progress, skipping ${trigger} trigger...`)
+      return
+    }
+
+    try {
+      setIsGrammarCheckInProgress(true)
+      setIsCheckingGrammar(true)
+      console.log(`🤖🤖🤖 SLATE: IMMEDIATE GRAMMAR CHECK (${trigger} trigger) 🤖🤖🤖`)
+      console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
+      console.log("🤖 SLATE: Document ID:", docId)
+      
+      // Use OpenRouter for grammar analysis
+      const result = await checkGrammarWithOpenRouterAction(text, docId)
+      
+      if (result.isSuccess && result.data && Array.isArray(result.data)) {
+        console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
+        
+        // Re-sync with database to get all suggestions (spelling + grammar)
+        if (onSuggestionsUpdated) {
+          onSuggestionsUpdated()
+        }
+      }
+    } catch (error) {
+      console.error("❌ SLATE: AI grammar check error:", error)
+    } finally {
+      setIsCheckingGrammar(false)
+      setIsGrammarCheckInProgress(false)
+    }
+  }, [onSuggestionsUpdated, isGrammarCheckInProgress])
 
   // Handle content changes
   const handleChange = useCallback((newValue: Descendant[]) => {
@@ -338,7 +381,7 @@ export const EditableContent = forwardRef<
       // Immediate spell check (500ms delay)
       debouncedSpellingCheckOnEdit(plainText, documentId)
       
-      // AI grammar check with longer delay (3000ms)
+      // AI grammar check with faster delay (1000ms) - also triggered by period/newline
       debouncedGrammarCheckWithAI(plainText, documentId)
     }
   }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, debouncedGrammarCheckWithAI, isAcceptingSuggestion])
@@ -446,19 +489,48 @@ export const EditableContent = forwardRef<
     }
   }, [suggestions, onSuggestionClick])
 
-  // Handle keyboard events for formatting shortcuts and spell checking triggers
+  // Handle keyboard events for formatting shortcuts and spell/grammar checking triggers
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    // Skip if accepting a suggestion
+    if (isAcceptingSuggestion) {
+      return
+    }
+
     // Handle spacebar for spell checking
-    if (event.key === ' ' && documentId && !isAcceptingSuggestion) {
+    if (event.key === ' ' && documentId) {
       // Trigger spell check after a very short delay to let the space be processed
       setTimeout(() => {
         const currentText = slateToText(value)
-                  if (currentText.trim() && documentId) {
-            console.log("🔤 SLATE: Spacebar pressed, triggering immediate spell check")
-            // Use the immediate spell check function (not the content change one)
-            debouncedSpellCheck(currentText, documentId)
-          }
+        if (currentText.trim() && documentId) {
+          console.log("🔤 SLATE: Spacebar pressed, triggering immediate spell check")
+          // Use the immediate spell check function (not the content change one)
+          debouncedSpellCheck(currentText, documentId)
+        }
       }, 50)
+    }
+
+    // Handle period for grammar checking
+    if (event.key === '.' && documentId) {
+      // Trigger grammar check after a short delay to let the period be processed
+      setTimeout(() => {
+        const currentText = slateToText(value)
+        if (currentText.trim() && documentId) {
+          console.log("🤖 SLATE: Period pressed, triggering immediate grammar check")
+          immediateGrammarCheck(currentText, documentId, 'period')
+        }
+      }, 100)
+    }
+
+    // Handle Enter/newline for grammar checking
+    if (event.key === 'Enter' && documentId) {
+      // Trigger grammar check after a short delay to let the newline be processed
+      setTimeout(() => {
+        const currentText = slateToText(value)
+        if (currentText.trim() && documentId) {
+          console.log("🤖 SLATE: Enter pressed, triggering immediate grammar check")
+          immediateGrammarCheck(currentText, documentId, 'newline')
+        }
+      }, 100)
     }
     
     // Handle formatting shortcuts
@@ -480,7 +552,7 @@ export const EditableContent = forwardRef<
         // Toggle underline (implement later)
         break
     }
-  }, [documentId, isAcceptingSuggestion, value, debouncedSpellCheck])
+  }, [documentId, isAcceptingSuggestion, value, debouncedSpellCheck, immediateGrammarCheck])
 
   // Accept suggestion by replacing text in the editor
   const acceptSuggestion = useCallback((suggestion: Suggestion) => {
@@ -624,7 +696,15 @@ export const EditableContent = forwardRef<
   }, [onFormatStateChange])
 
   return (
-    <div className="slate-editor" onClick={handleClick}>
+    <div className="slate-editor relative" onClick={handleClick}>
+      {/* Grammar check status indicator */}
+      {/* {isGrammarCheckInProgress && (
+        <div className="absolute top-2 right-2 flex items-center space-x-2 bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">
+          <div className="animate-spin h-3 w-3 border border-blue-600 border-t-transparent rounded-full"></div>
+          <span>Checking grammar...</span>
+        </div>
+      )} */}
+      
       <Slate
         editor={editor}
         initialValue={value}

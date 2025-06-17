@@ -954,9 +954,10 @@ export default function GrammarlyEditor() {
                     </div>
                   ) : (
                     suggestions.map(suggestion => {
-                      // All suggestions are now spelling suggestions (updated with new categorization)
-                      const suggestionTypeColor = 'bg-red-100';
-                      const suggestionDotColor = 'bg-red-500';
+                      // Handle both spelling and grammar suggestions now
+                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100';
+                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-blue-500';
+                      const suggestionLabel = suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar';
                       
                       return (
                         <div
@@ -971,7 +972,7 @@ export default function GrammarlyEditor() {
                               </div>
                               <div className="min-w-0 flex-1">
                                                               <div className="mb-1 break-words text-sm font-medium text-gray-900">
-                                Spelling suggestion
+                                {suggestionLabel} suggestion
                               </div>
                                 {suggestion.suggestedText && (
                                   <div className="mb-1 break-words text-sm font-medium text-green-700">

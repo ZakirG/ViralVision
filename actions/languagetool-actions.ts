@@ -470,19 +470,29 @@ export async function checkGrammarOnlyWithLanguageToolAction(
   }
 }
 
-// Backward compatibility function that combines both spell and grammar checking
+// Backward compatibility function that combines both spell and AI grammar checking
 export async function checkGrammarWithLanguageToolAction(
   text: string,
   documentId: string
 ): Promise<ActionState<Suggestion[]>> {
   try {
-    console.log("🔧🔤 Running combined spell + grammar check...")
+    console.log("🔧🔤🤖 COMBINED FUNCTION CALLED: Running spell + AI grammar check...")
+    console.log("🔧🔤🤖 Text being processed:", text)
     
-    // Run both spell and grammar checks
+    // Import the AI grammar function
+    console.log("🔧🔤🤖 Importing OpenRouter grammar action...")
+    const { checkGrammarWithOpenRouterAction } = await import("./openrouter-grammar-actions")
+    console.log("🔧🔤🤖 OpenRouter function imported successfully")
+    
+    // Run both spell and AI grammar checks
+    console.log("🔧🔤🤖 Starting parallel execution of spell and grammar checks...")
     const [spellResult, grammarResult] = await Promise.all([
       checkSpellingWithLanguageToolAction(text, documentId),
-      checkGrammarOnlyWithLanguageToolAction(text, documentId)
+      checkGrammarWithOpenRouterAction(text, documentId)
     ])
+    
+    console.log("🔧🔤🤖 Spell result:", spellResult)
+    console.log("🔧🔤🤖 Grammar result:", grammarResult)
 
     // Check if both were successful
     if (!spellResult.isSuccess || !grammarResult.isSuccess) {
@@ -503,11 +513,11 @@ export async function checkGrammarWithLanguageToolAction(
 
     return {
       isSuccess: true,
-      message: `Combined check completed. ${totalSpelling} spelling + ${totalGrammar} grammar suggestions found.`,
+      message: `Combined check completed. ${totalSpelling} spelling + ${totalGrammar} AI grammar suggestions found.`,
       data: combinedSuggestions
     }
   } catch (error) {
-    console.error("Combined spell+grammar check error:", error)
+    console.error("Combined spell+AI grammar check error:", error)
     return {
       isSuccess: false,
       message: "Failed to check spelling and grammar"

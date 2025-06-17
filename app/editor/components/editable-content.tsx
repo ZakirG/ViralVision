@@ -12,6 +12,7 @@ import {
 } from "react"
 import { checkGrammarWithLanguageToolAction } from "@/actions/languagetool-actions"
 import { checkSpellingWithLanguageToolAction, checkGrammarOnlyWithLanguageToolAction } from "@/actions/languagetool-actions"
+import { checkGrammarWithOpenRouterAction } from "@/actions/openrouter-grammar-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
 import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms } from "slate"
@@ -285,6 +286,35 @@ export const EditableContent = forwardRef<
     [onSuggestionsUpdated]
   )
 
+  // New OpenRouter-based grammar checking with longer delay
+  const debouncedGrammarCheckWithAI = useCallback(
+    debounce(async (text: string, docId: string) => {
+      try {
+        setIsCheckingGrammar(true)
+        console.log("🤖🤖🤖 SLATE: CALLING OPENROUTER AI GRAMMAR CHECK 🤖🤖🤖")
+        console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
+        console.log("🤖 SLATE: Document ID:", docId)
+        
+        // Use OpenRouter for grammar analysis
+        const result = await checkGrammarWithOpenRouterAction(text, docId)
+        
+        if (result.isSuccess && result.data && Array.isArray(result.data)) {
+          console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
+          
+          // Re-sync with database to get all suggestions (spelling + grammar)
+          if (onSuggestionsUpdated) {
+            onSuggestionsUpdated()
+          }
+        }
+      } catch (error) {
+        console.error("❌ SLATE: AI grammar check error:", error)
+      } finally {
+        setIsCheckingGrammar(false)
+      }
+    }, 3000), // Longer delay for AI grammar checks (3 seconds)
+    [onSuggestionsUpdated]
+  )
+
   // Handle content changes
   const handleChange = useCallback((newValue: Descendant[]) => {
     setValue(newValue)
@@ -303,11 +333,15 @@ export const EditableContent = forwardRef<
       return
     }
     
-    // Trigger spell check on content changes (now using spelling function)
+    // Trigger both spelling and grammar checks on content changes
     if (documentId && plainText.trim()) {
+      // Immediate spell check (500ms delay)
       debouncedSpellingCheckOnEdit(plainText, documentId)
+      
+      // AI grammar check with longer delay (3000ms)
+      debouncedGrammarCheckWithAI(plainText, documentId)
     }
-  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, isAcceptingSuggestion])
+  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, debouncedGrammarCheckWithAI, isAcceptingSuggestion])
 
   // Create decorations for suggestions
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -420,8 +454,8 @@ export const EditableContent = forwardRef<
       setTimeout(() => {
         const currentText = slateToText(value)
                   if (currentText.trim() && documentId) {
-            console.log("🔤 SLATE: Spacebar pressed, triggering spell check")
-            // Use the corrected spelling check function  
+            console.log("🔤 SLATE: Spacebar pressed, triggering immediate spell check")
+            // Use the immediate spell check function (not the content change one)
             debouncedSpellCheck(currentText, documentId)
           }
       }, 50)

@@ -268,7 +268,7 @@ export default function GrammarlyEditor() {
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
       if (result.isSuccess && result.data) {
-        // Filter out accepted and rejected suggestions
+        // Filter out accepted and locally rejected suggestions
         const filteredSuggestions = result.data.filter(s => 
           !s.accepted && !rejectedSuggestionIds.has(s.id)
         )
@@ -338,8 +338,6 @@ export default function GrammarlyEditor() {
         console.error("Failed to log suggestion rejected event:", error)
       }
     }
-    
-    console.log("Rejected suggestion:", suggestion.id)
     
     toast({
       title: "Suggestion Dismissed",
@@ -651,62 +649,65 @@ export default function GrammarlyEditor() {
         </div>
       </div>
 
+      {/* Collapse/Expand Button */}
+      <div 
+        className={`fixed top-1/2 z-30 -translate-y-1/2 transition-all duration-300 ease-in-out ${
+          rightPanelCollapsed ? "right-20" : "right-[324px]"
+        }`} 
+        id="right-panel-collapse-button"
+      >
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
+          className="size-12 rounded-full border-2 border-gray-400 bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
+        >
+          {rightPanelCollapsed ? (
+            <ChevronRight className="size-8 text-gray-700" />
+          ) : (
+            <svg
+              className="size-8 text-gray-700"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={3}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          )}
+        </Button>
+      </div>
+
       {/* Right sidebar - Collapsible */}
       <div
         className={`${rightPanelCollapsed ? "w-16" : "w-80"} min-w-${rightPanelCollapsed ? "16" : "80"} flex flex-col border-l border-gray-200 bg-white transition-all duration-300 ease-in-out`}
       >
-        {/* Collapse/Expand Button */}
-        <div className="absolute -left-12 top-1/2 z-30 -translate-y-1/2">
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-            className="size-12 rounded-full border-2 border-gray-400 bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
-          >
-            {rightPanelCollapsed ? (
-              <ChevronRight className="size-8 text-gray-700" />
-            ) : (
-              <svg
-                className="size-8 text-gray-700"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={3}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            )}
-          </Button>
-        </div>
 
         {rightPanelCollapsed ? (
           /* Collapsed Panel */
-          <div className="flex flex-col items-center space-y-4 py-4">
-            <Button className="mt-8 h-auto w-32 origin-center -rotate-90 whitespace-nowrap bg-teal-600 px-2 py-1 text-xs text-white hover:bg-teal-700">
-              CORRECT WITH ASSISTANT
+          <div className="flex flex-col items-center space-y-6 py-4">
+            <Button 
+              className="mt-4 flex size-10 items-center justify-center rounded-full bg-teal-600 p-0 text-white hover:bg-teal-700"
+              title="Correct with Assistant"
+            >
+              <Sparkles className="size-4" />
             </Button>
 
-            <div className="mt-8 flex flex-col items-center space-y-3">
-              <div className="flex flex-col items-center">
-                <div className="mb-1 flex size-6 items-center justify-center rounded-full bg-gray-500">
-                  <span className="text-xs font-medium text-white">{suggestions.length}</span>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="flex flex-col items-center" title="Suggestions">
+                <div className="flex size-8 items-center justify-center rounded-full bg-gray-500">
+                  <span className="text-sm font-medium text-white">{suggestions.length}</span>
                 </div>
-                <span className="w-16 origin-center -rotate-90 text-center text-xs leading-tight text-gray-600">
-                  SUGGESTIONS
-                </span>
               </div>
 
-              <div className="mt-6 flex flex-col items-center">
-                <div className="mb-1 flex size-6 items-center justify-center rounded-full bg-orange-500">
-                  <span className="text-xs font-medium text-white">13</span>
+              <div className="flex flex-col items-center" title="Pro Features">
+                <div className="flex size-8 items-center justify-center rounded-full bg-orange-500">
+                  <span className="text-sm font-medium text-white">13</span>
                 </div>
-                <span className="w-16 origin-center -rotate-90 text-center text-xs leading-tight text-gray-600">
-                  PRO
-                </span>
               </div>
             </div>
           </div>

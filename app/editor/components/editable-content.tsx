@@ -55,12 +55,19 @@ export const EditableContent = forwardRef<
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+
+  // Debug suggestions state changes
+  useEffect(() => {
+    console.log("🔄 Suggestions state changed to:", suggestions.length, "suggestions")
+    suggestions.forEach((s, i) => {
+      console.log(`🔄 Suggestion ${i}: ${s.suggestionType} "${s.suggestedText}" at ${s.startOffset}-${s.endOffset}`)
+    })
+  }, [suggestions])
   const lastCleanTextRef = useRef<string>("")
   const isUpdatingContentRef = useRef(false)
   const isProcessingEnterRef = useRef(false)
   const isProcessingUserInputRef = useRef(false)
   const pendingSuggestionUpdateRef = useRef(false)
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [textContent, setTextContent] = useState(initialContent)
 
   // Get clean text content from editor, stripping all HTML
@@ -179,19 +186,40 @@ export const EditableContent = forwardRef<
   // Fetch suggestions for the document
   const fetchSuggestions = useCallback(async (docId: string) => {
     try {
+      console.log("📡 fetchSuggestions starting for docId:", docId)
       setLoadingSuggestions(true)
       const result = await getSuggestionsByDocumentIdAction(docId, 1) // Version 1
+      console.log("📡 getSuggestionsByDocumentIdAction result:", result)
+      
       if (result.isSuccess && result.data) {
+        console.log("📡 Raw suggestions from DB:", result.data.length, "suggestions")
+        result.data.forEach((s, i) => {
+          console.log(`📡 Suggestion ${i}:`, {
+            id: s.id,
+            accepted: s.accepted,
+            text: s.suggestedText,
+            startOffset: s.startOffset,
+            endOffset: s.endOffset,
+            type: s.suggestionType
+          })
+        })
+        
         // Filter out accepted and rejected suggestions
         const filteredSuggestions = result.data.filter(s => 
           !s.accepted && !(rejectedSuggestionIds && rejectedSuggestionIds.has(s.id))
         )
+        console.log("📡 Filtered suggestions:", filteredSuggestions.length, "suggestions after filtering")
+        console.log("📡 Rejected suggestion IDs:", Array.from(rejectedSuggestionIds || []))
+        console.log("📡 Setting suggestions state to:", filteredSuggestions.length, "suggestions")
         setSuggestions(filteredSuggestions)
+      } else {
+        console.log("📡 No suggestions or error:", result.message)
       }
     } catch (error) {
-      console.error("Error fetching suggestions:", error)
+      console.error("❌ Error fetching suggestions:", error)
     } finally {
       setLoadingSuggestions(false)
+      console.log("📡 fetchSuggestions finished")
     }
   }, [rejectedSuggestionIds])
 
@@ -199,21 +227,28 @@ export const EditableContent = forwardRef<
   const debouncedGrammarCheck = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
+        console.log("🚀 debouncedGrammarCheck starting for docId:", docId, "text length:", text.length)
         setIsCheckingGrammar(true)
-        await checkGrammarWithLanguageToolAction(text, docId)
+        const result = await checkGrammarWithLanguageToolAction(text, docId)
+        console.log("✅ Grammar check completed, result:", result)
         // Fetch suggestions after grammar check completes
-        fetchSuggestions(docId)
+        console.log("📥 Fetching suggestions after grammar check...")
+        await fetchSuggestions(docId)
       } catch (error) {
-        console.error("Grammar check error:", error)
+        console.error("❌ Grammar check error:", error)
       } finally {
         setIsCheckingGrammar(false)
+        console.log("🏁 Grammar check finished")
       }
-    }, 2000), // 2 second debounce delay
+    }, 1000), // 1 second debounce delay for faster feedback
     [fetchSuggestions]
   )
 
   const updateContent = useCallback(() => {
-    if (isUpdatingContentRef.current) return
+    if (isUpdatingContentRef.current) {
+      console.log("🟡 updateContent skipped - isUpdatingContentRef is true")
+      return
+    }
 
     // Get clean text for comparison and grammar checking
     const cleanText = getCleanTextContent()
@@ -221,32 +256,38 @@ export const EditableContent = forwardRef<
     // Get rich HTML content for saving (preserve formatting)
     const richContent = editorRef.current?.innerHTML || ''
 
+    console.log("🟢 updateContent - cleanText:", cleanText.substring(0, 50) + "...")
+    console.log("🟢 updateContent - textContent:", textContent.substring(0, 50) + "...")
+
     if (cleanText !== textContent) {
+      console.log("🟢 Content changed! Setting new text content")
       setTextContent(cleanText)
       // Pass rich HTML content to maintain formatting when saving
       onContentChange(richContent)
       
-      // Clear existing debounce timer
-      if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current)
+      // Use the debounced grammar check function
+      if (documentId && cleanText.trim()) {
+        console.log("🟢 Triggering debouncedGrammarCheck with documentId:", documentId)
+        debouncedGrammarCheck(cleanText, documentId)
+      } else {
+        console.log("🔴 NOT triggering grammar check - documentId:", documentId, "cleanText length:", cleanText.trim().length)
       }
-      
-      // Use clean text for grammar checking
-      if (documentId) {
-        debounceTimeoutRef.current = setTimeout(() => {
-          checkGrammarWithLanguageToolAction(cleanText, documentId)
-        }, 2000)
-      }
+    } else {
+      console.log("🟡 Content unchanged, skipping grammar check")
     }
-  }, [textContent, onContentChange, documentId, getCleanTextContent])
+  }, [textContent, onContentChange, documentId, getCleanTextContent, debouncedGrammarCheck])
 
   // Update innerHTML with highlighted suggestions while preserving cursor
   const updateContentWithSuggestions = useCallback((textContent: string, caller?: string) => {
+    console.log("🎭 updateContentWithSuggestions called by:", caller, "text length:", textContent.length)
+    
     if (!editorRef.current || isUpdatingContentRef.current) {
+      console.log("🎭 Skipping - editorRef.current:", !!editorRef.current, "isUpdatingContentRef.current:", isUpdatingContentRef.current)
       return
     }
     
     if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
+      console.log("🎭 Fast update without cursor preservation")
       // Still update the content but without cursor preservation
       isUpdatingContentRef.current = true
       const highlightedHTML = highlightSuggestions(textContent)
@@ -255,22 +296,26 @@ export const EditableContent = forwardRef<
       return
     }
     
+    console.log("🎭 Full update with cursor preservation")
     isUpdatingContentRef.current = true
     const cursorPosition = saveCursorPosition()
     
     // Generate highlighted HTML
     const highlightedHTML = highlightSuggestions(textContent)
+    console.log("🎭 Setting innerHTML to editor")
     editorRef.current.innerHTML = highlightedHTML
     
     // Restore cursor position after a brief delay
     setTimeout(() => {
       restoreCursorPosition(cursorPosition)
       isUpdatingContentRef.current = false
+      console.log("🎭 Cursor position restored")
     }, 0)
-  }, [saveCursorPosition, restoreCursorPosition])
+  }, [saveCursorPosition, restoreCursorPosition, suggestions])
 
   const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
     const inputType = (e.nativeEvent as InputEvent).inputType
+    console.log("🔵 handleInput triggered, inputType:", inputType)
     
     // Track that we're processing user input
     isProcessingUserInputRef.current = true
@@ -366,7 +411,10 @@ export const EditableContent = forwardRef<
   }
 
   const highlightSuggestions = (text: string) => {
+    console.log("🖍️ highlightSuggestions called with text length:", text.length, "suggestions count:", suggestions.length)
+    
     if (!suggestions.length) {
+      console.log("🖍️ No suggestions to highlight")
       return text.replace(/\n/g, "<br>")
     }
 
@@ -377,20 +425,33 @@ export const EditableContent = forwardRef<
       (b.startOffset || 0) - (a.startOffset || 0)
     )
 
-    sortedSuggestions.forEach(suggestion => {
+    console.log("🖍️ Highlighting", sortedSuggestions.length, "suggestions")
+
+    sortedSuggestions.forEach((suggestion, index) => {
       if (suggestion.startOffset !== null && suggestion.endOffset !== null) {
         const beforeText = highlightedText.substring(0, suggestion.startOffset)
         const suggestionText = highlightedText.substring(suggestion.startOffset, suggestion.endOffset)
         const afterText = highlightedText.substring(suggestion.endOffset)
         
+        console.log(`🖍️ Highlighting suggestion ${index}:`, {
+          startOffset: suggestion.startOffset,
+          endOffset: suggestion.endOffset,
+          originalText: suggestionText,
+          suggestionType: suggestion.suggestionType
+        })
+        
         const suggestionType = suggestion.suggestionType === 'spelling' ? 'red' : 'blue'
         const wrappedText = `<span class="suggestion-underline cursor-pointer underline decoration-${suggestionType}-500 decoration-2 decoration-wavy" data-suggestion-id="${suggestion.id}" title="${suggestion.explanation || 'Click for suggestion'}">${suggestionText}</span>`
         
         highlightedText = beforeText + wrappedText + afterText
+      } else {
+        console.log(`🖍️ Skipping suggestion ${index} - invalid offsets:`, suggestion.startOffset, suggestion.endOffset)
       }
     })
 
-    return highlightedText.replace(/\n/g, "<br>")
+    const result = highlightedText.replace(/\n/g, "<br>")
+    console.log("🖍️ Final highlighted HTML length:", result.length)
+    return result
   }
 
   // Helper function to extract clean text from HTML content
@@ -440,26 +501,35 @@ export const EditableContent = forwardRef<
 
   // Update suggestions when rejected list changes
   useEffect(() => {
+    console.log("🧹 useEffect[rejectedSuggestionIds] triggered - documentId:", documentId, "rejectedIds size:", rejectedSuggestionIds?.size || 0)
     if (documentId && rejectedSuggestionIds) {
-      // Filter out newly rejected suggestions from current list
-      setSuggestions(prevSuggestions => 
-        prevSuggestions.filter(s => !rejectedSuggestionIds.has(s.id))
-      )
+      console.log("🧹 Filtering suggestions based on rejected IDs...")
+      setSuggestions(prevSuggestions => {
+        console.log("🧹 Before filtering:", prevSuggestions.length, "suggestions")
+        const filtered = prevSuggestions.filter(s => !rejectedSuggestionIds.has(s.id))
+        console.log("🧹 After filtering:", filtered.length, "suggestions")
+        return filtered
+      })
     }
   }, [rejectedSuggestionIds, documentId])
 
   // Update content when suggestions change
   useEffect(() => {
+    console.log("🎨 useEffect[suggestions] triggered - suggestions count:", suggestions.length)
     if (editorRef.current && isInitialized) {
       // Skip if any user input is being processed to avoid using stale content
       if (isProcessingEnterRef.current || isProcessingUserInputRef.current) {
+        console.log("🎨 Pending suggestion update due to processing")
         pendingSuggestionUpdateRef.current = true
         return
       }
       
       // Use getCleanTextContent() to get actual current content, not stale textContent
       const currentContent = getCleanTextContent()
+      console.log("🎨 Updating content with suggestions...")
       updateContentWithSuggestions(currentContent, "useEffect[suggestions]")
+    } else {
+      console.log("🎨 Skipping suggestion update - editorRef.current:", !!editorRef.current, "isInitialized:", isInitialized)
     }
   }, [suggestions, isInitialized, updateContentWithSuggestions, getCleanTextContent])
 

@@ -104,9 +104,13 @@ export async function checkGrammarWithLanguageToolAction(
   documentId: string
 ): Promise<ActionState<{ suggestionsCreated: number }>> {
   try {
+    console.log("🔧 checkGrammarWithLanguageToolAction starting - text length:", text.length, "documentId:", documentId)
+    
     const { userId } = await auth()
+    console.log("🔧 Auth check - userId:", userId ? "✅" : "❌")
     
     if (!userId) {
+      console.log("🔧 User not authenticated, returning error")
       return {
         isSuccess: false,
         message: "User not authenticated"
@@ -114,6 +118,7 @@ export async function checkGrammarWithLanguageToolAction(
     }
 
     if (!text.trim()) {
+      console.log("🔧 No text to check, returning success")
       return {
         isSuccess: true,
         message: "No text to check",
@@ -122,6 +127,7 @@ export async function checkGrammarWithLanguageToolAction(
     }
 
     // Ensure document_versions entry exists (create if missing)
+    console.log("🔧 Checking document version entry...")
     const existingVersion = await db
       .select()
       .from(documentVersionsTable)
@@ -134,6 +140,7 @@ export async function checkGrammarWithLanguageToolAction(
       .limit(1)
 
     if (existingVersion.length === 0) {
+      console.log("🔧 Creating missing document version entry...")
       // Create the missing document version entry
       await db
         .insert(documentVersionsTable)
@@ -143,12 +150,17 @@ export async function checkGrammarWithLanguageToolAction(
           textSnapshot: text
         })
         .onConflictDoNothing()
+      console.log("🔧 Document version entry created")
+    } else {
+      console.log("🔧 Document version entry exists")
     }
 
     // Check cache first
+    console.log("🔧 Checking cache for response...")
     let languageToolResponse = await getCachedResponse(text)
     
     if (!languageToolResponse) {
+      console.log("🔧 No cached response, calling LanguageTool API...")
       // Call LanguageTool API
       const response = await fetch('https://api.languagetool.org/v2/check', {
         method: 'POST',
@@ -161,8 +173,10 @@ export async function checkGrammarWithLanguageToolAction(
           enabledOnly: 'false'
         })
       })
+      console.log("🔧 LanguageTool API response status:", response.status)
 
       if (!response.ok) {
+        console.log("🔧 LanguageTool API error - status:", response.status)
         return {
           isSuccess: false,
           message: `LanguageTool API error: ${response.status}`
@@ -170,19 +184,21 @@ export async function checkGrammarWithLanguageToolAction(
       }
 
       try {
+        console.log("🔧 Parsing LanguageTool API response...")
         const responseText = await response.text()
         languageToolResponse = JSON.parse(responseText) as LanguageToolResponse
+        console.log("🔧 LanguageTool API response parsed, matches found:", languageToolResponse.matches?.length || 0)
         
         // Validate the API response structure
         if (!languageToolResponse || typeof languageToolResponse !== 'object' || !Array.isArray(languageToolResponse.matches)) {
-          console.error('Invalid LanguageTool API response structure:', languageToolResponse)
+          console.error('🔧 Invalid LanguageTool API response structure:', languageToolResponse)
           return {
             isSuccess: false,
             message: "Invalid response from grammar checking service"
           }
         }
       } catch (jsonError) {
-        console.error('Failed to parse LanguageTool API response:', jsonError)
+        console.error('🔧 Failed to parse LanguageTool API response:', jsonError)
         return {
           isSuccess: false,
           message: "Failed to parse grammar checking response"
@@ -190,13 +206,18 @@ export async function checkGrammarWithLanguageToolAction(
       }
       
       // Cache the response (will validate again before caching)
+      console.log("🔧 Caching LanguageTool response...")
       await setCachedResponse(text, languageToolResponse)
+    } else {
+      console.log("🔧 Using cached response with", languageToolResponse.matches?.length || 0, "matches")
     }
 
     const userUuid = clerkUserIdToUuid(userId)
+    console.log("🔧 User UUID:", userUuid)
     
     // Clear existing unaccepted suggestions for this document before adding new ones
-    await db
+    console.log("🔧 Clearing existing suggestions...")
+    const deleteResult = await db
       .delete(suggestionsTable)
       .where(
         and(
@@ -205,10 +226,12 @@ export async function checkGrammarWithLanguageToolAction(
           eq(suggestionsTable.accepted, false)
         )
       )
+    console.log("🔧 Cleared existing suggestions")
     
     let suggestionsCreated = 0
 
     // Store suggestions in database
+    console.log("🔧 Processing", languageToolResponse.matches.length, "matches...")
     for (const match of languageToolResponse.matches) {
       try {
         // Validate match structure
@@ -222,6 +245,7 @@ export async function checkGrammarWithLanguageToolAction(
         }
 
         const suggestionType = match.type.typeName.toLowerCase().includes('spell') ? 'spelling' : 'grammar'
+        console.log(`🔧 Creating suggestion ${suggestionsCreated + 1}: ${suggestionType} - "${match.message}" at offset ${match.offset}-${match.offset + match.length}`)
         
         await db
           .insert(suggestionsTable)
@@ -238,6 +262,7 @@ export async function checkGrammarWithLanguageToolAction(
           })
         
         suggestionsCreated++
+        console.log(`🔧 Suggestion ${suggestionsCreated} created successfully`)
       } catch (error) {
         console.error("Error storing suggestion:", error)
         // Continue with other suggestions even if one fails
@@ -245,12 +270,15 @@ export async function checkGrammarWithLanguageToolAction(
     }
 
     // Log analytics event for grammar check
+    console.log("🔧 Logging analytics event...")
     try {
       await logGrammarCheckAction(documentId, text.length, suggestionsCreated)
+      console.log("🔧 Analytics event logged successfully")
     } catch (error) {
-      console.error("Failed to log grammar check analytics:", error)
+      console.error("🔧 Failed to log grammar check analytics:", error)
     }
 
+    console.log(`🔧 Grammar check completed successfully! Created ${suggestionsCreated} suggestions`)
     return {
       isSuccess: true,
       message: `Grammar check completed. ${suggestionsCreated} suggestions found.`,
@@ -258,7 +286,7 @@ export async function checkGrammarWithLanguageToolAction(
     }
 
   } catch (error) {
-    console.error("Error checking grammar with LanguageTool:", error)
+    console.error("🔧 Error checking grammar with LanguageTool:", error)
     return {
       isSuccess: false,
       message: "Failed to check grammar"

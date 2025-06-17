@@ -82,7 +82,7 @@ export default function GrammarlyEditor() {
   const [saving, setSaving] = useState(false)
   const [selectedSuggestionForPanel, setSelectedSuggestionForPanel] = useState<Suggestion | null>(null)
   const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
-  const [rejectedSuggestionIds, setRejectedSuggestionIds] = useState<Set<string>>(new Set())
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
 
   const router = useRouter()
@@ -268,16 +268,16 @@ export default function GrammarlyEditor() {
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
       if (result.isSuccess && result.data) {
-        // Filter out accepted and locally rejected suggestions
+        // Filter out accepted and locally dismissed suggestions
         const filteredSuggestions = result.data.filter(s => 
-          !s.accepted && !rejectedSuggestionIds.has(s.id)
+          !s.accepted && !dismissedIds.has(s.id)
         )
         setRealSuggestions(filteredSuggestions)
       }
     } catch (error) {
       console.error("Error refreshing suggestions:", error)
     }
-  }, [documentId, rejectedSuggestionIds])
+  }, [documentId, dismissedIds])
 
   const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
     if (!suggestion.startOffset || !suggestion.endOffset || !suggestion.suggestedText) {
@@ -322,7 +322,7 @@ export default function GrammarlyEditor() {
   }, [documentContent, documentId, refreshSuggestions])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
-    setRejectedSuggestionIds(prev => new Set([...prev, suggestion.id]))
+    setDismissedIds(prev => new Set([...prev, suggestion.id]))
     
     // Remove the rejected suggestion from the list immediately
     setRealSuggestions(prev => prev.filter(s => s.id !== suggestion.id))
@@ -507,7 +507,8 @@ export default function GrammarlyEditor() {
                 onFormatStateChange={handleFormatStateChange}
                 documentId={documentId || undefined}
                 onSuggestionClick={handleSuggestionClick}
-                rejectedSuggestionIds={rejectedSuggestionIds}
+                dismissedIds={dismissedIds}
+                onSuggestionsUpdated={refreshSuggestions}
               />
             </div>
           </div>

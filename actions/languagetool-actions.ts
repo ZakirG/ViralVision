@@ -9,6 +9,7 @@ Handles grammar and spell checking via LanguageTool API.
 
 import { db } from "@/db/db"
 import { suggestionsTable, cacheLlmResponsesTable, documentVersionsTable } from "@/db/schema"
+import type { Suggestion } from "@/db/schema"
 import { eq, and } from "drizzle-orm"
 import type { ActionState } from "@/types/server-action-types"
 import { auth } from "@clerk/nextjs/server"
@@ -102,7 +103,7 @@ async function setCachedResponse(text: string, response: LanguageToolResponse): 
 export async function checkGrammarWithLanguageToolAction(
   text: string,
   documentId: string
-): Promise<ActionState<{ suggestionsCreated: number }>> {
+): Promise<ActionState<Suggestion[]>> {
   try {
     console.log("🔧 checkGrammarWithLanguageToolAction starting - text length:", text.length, "documentId:", documentId)
     
@@ -122,7 +123,7 @@ export async function checkGrammarWithLanguageToolAction(
       return {
         isSuccess: true,
         message: "No text to check",
-        data: { suggestionsCreated: 0 }
+        data: []
       }
     }
 
@@ -278,11 +279,24 @@ export async function checkGrammarWithLanguageToolAction(
       console.error("🔧 Failed to log grammar check analytics:", error)
     }
 
-    console.log(`🔧 Grammar check completed successfully! Created ${suggestionsCreated} suggestions`)
+    // Fetch the suggestions we just created to return them
+    console.log("🔧 Fetching created suggestions to return...")
+    const createdSuggestions = await db
+      .select()
+      .from(suggestionsTable)
+      .where(
+        and(
+          eq(suggestionsTable.documentId, documentId),
+          eq(suggestionsTable.versionNumber, 1),
+          eq(suggestionsTable.accepted, false)
+        )
+      )
+
+    console.log(`🔧 Grammar check completed successfully! Created ${suggestionsCreated} suggestions, returning ${createdSuggestions.length} suggestions`)
     return {
       isSuccess: true,
       message: `Grammar check completed. ${suggestionsCreated} suggestions found.`,
-      data: { suggestionsCreated }
+      data: createdSuggestions
     }
 
   } catch (error) {

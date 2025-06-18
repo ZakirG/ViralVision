@@ -109,6 +109,13 @@ export default function GrammarlyEditor() {
         setDocument(result.data)
         setDocumentContent(result.data.rawText || "")
         setDocumentTitle(result.data.title || "Untitled Document")
+        
+        // Initialize last saved content to prevent initial unnecessary save
+        lastSavedContentRef.current = {
+          title: result.data.title || "Untitled Document",
+          content: result.data.rawText || ""
+        }
+        console.log("💾 SAVE: Document loaded, initialized lastSavedContent")
       } else {
         toast({
           title: "Error",
@@ -143,17 +150,28 @@ export default function GrammarlyEditor() {
     }
   }, [isLoaded, isSignedIn, documentId, router, loadDocument])
 
+  // Track last saved content to prevent unnecessary saves
+  const lastSavedContentRef = useRef<{ title: string; content: string }>({ title: "", content: "" })
+
   const saveDocument = useCallback(async () => {
     if (!document || !documentId || saving) return
 
     try {
       setSaving(true)
+      console.log("💾 SAVE: Updating document in database")
       const result = await updateDocumentAction(documentId, {
         title: documentTitle,
         rawText: documentContent
       })
 
-      if (!result.isSuccess) {
+      if (result.isSuccess) {
+        // Update last saved content on successful save
+        lastSavedContentRef.current = {
+          title: documentTitle,
+          content: documentContent
+        }
+        console.log("💾 SAVE: Document saved successfully, updated lastSavedContent")
+      } else {
         console.error("Save failed:", result.message)
         // Only show toast if component is still mounted
         if (document && documentId) {
@@ -179,14 +197,31 @@ export default function GrammarlyEditor() {
     }
   }, [document, documentId, saving, documentTitle, documentContent])
 
-  // Auto-save functionality
+  // Auto-save functionality with change detection
   useEffect(() => {
     if (!document || !documentId || saving) return
 
     const saveTimeout = setTimeout(() => {
       // Only save if the component is still mounted and user is still on this page
       if (document && documentId && !saving) {
-        saveDocument()
+        // CRITICAL FIX: Only save if content actually changed
+        const lastSaved = lastSavedContentRef.current
+        const hasContentChanged = documentContent !== lastSaved.content
+        const hasTitleChanged = documentTitle !== lastSaved.title
+        
+        if (hasContentChanged || hasTitleChanged) {
+          console.log("💾 SAVE: Content changed, triggering auto-save:", {
+            contentChanged: hasContentChanged,
+            titleChanged: hasTitleChanged,
+            oldContentLength: lastSaved.content.length,
+            newContentLength: documentContent.length,
+            oldTitle: lastSaved.title,
+            newTitle: documentTitle
+          })
+          saveDocument()
+        } else {
+          console.log("🚫 SAVE: Content unchanged, skipping auto-save (preventing unnecessary POST)")
+        }
       }
     }, 2000) // Auto-save after 2 seconds of inactivity
 
@@ -202,12 +237,26 @@ export default function GrammarlyEditor() {
 
   // Manual save function
   const handleSave = useCallback(() => {
-    saveDocument()
-    toast({
-      title: "Saved",
-      description: "Document saved successfully"
-    })
-  }, [saveDocument])
+    // Check if content actually changed before manual save
+    const lastSaved = lastSavedContentRef.current
+    const hasContentChanged = documentContent !== lastSaved.content
+    const hasTitleChanged = documentTitle !== lastSaved.title
+    
+    if (hasContentChanged || hasTitleChanged) {
+      console.log("💾 SAVE: Manual save - content changed")
+      saveDocument()
+      toast({
+        title: "Saved",
+        description: "Document saved successfully"
+      })
+    } else {
+      console.log("💾 SAVE: Manual save - no changes to save")
+      toast({
+        title: "No Changes",
+        description: "Document is already up to date"
+      })
+    }
+  }, [saveDocument, documentContent, documentTitle])
 
   // Keyboard shortcuts
   useEffect(() => {

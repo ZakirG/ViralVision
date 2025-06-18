@@ -190,10 +190,10 @@ export const EditableContent = forwardRef<
   // Use suggestions from props instead of internal state
   const suggestions = propSuggestions
 
-  // Debug prop suggestions
+  // Debug prop suggestions - helps identify continuous updates
   useEffect(() => {
-    console.log(`🎨 PROPS: Received ${suggestions.length} suggestions from parent:`, 
-      suggestions.map(s => ({ id: s.id, text: s.suggestedText, dismissed: s.dismissed }))
+    console.log(`🎨 PROPS: Received ${suggestions.length} suggestions from parent (should not trigger continuously when idle):`, 
+      suggestions.map(s => ({ id: s.id.substring(0, 8), text: s.suggestedText?.substring(0, 20), dismissed: s.dismissed }))
     )
   }, [suggestions])
 
@@ -208,37 +208,26 @@ export const EditableContent = forwardRef<
     return htmlToSlate(initialContent)
   })
 
-  // Force Slate to re-render decorations when suggestions change
-  useEffect(() => {
-    // Only force re-render if we have content and suggestions
-    if (value.length > 0 && (suggestions.length > 0 || loadingSuggestions)) {
-      console.log(`🎨 SLATE: Forcing editor re-render due to suggestions change (${suggestions.length} suggestions)`)
-      
-      // Use a more targeted approach - just trigger onChange to refresh decorations
-      try {
-        const currentSelection = editor.selection
-        editor.onChange()
-        
-        // Restore selection if it existed and is still valid
-        if (currentSelection && Range.isRange(currentSelection)) {
-          try {
-            Transforms.select(editor, currentSelection)
-          } catch (e) {
-            // Selection might be invalid after content changes, ignore
-            console.log('🎨 SLATE: Could not restore selection, continuing...')
-          }
-        }
-      } catch (error) {
-        console.error('🎨 SLATE: Error forcing editor re-render:', error)
-      }
-    }
-  }, [suggestions, editor, value, loadingSuggestions])
+  // REMOVED: The problematic re-render loop that was causing continuous API calls
+  // Slate will automatically re-render decorations when suggestions change via the decorate function
 
   // Update editor when initialContent changes (e.g., when suggestion is accepted)
   useEffect(() => {
     if (initialContent) {
       const newValue = htmlToSlate(initialContent)
-      setValue(newValue)
+      const newText = slateToText(newValue)
+      
+      // Only update if the content actually changed to prevent loops
+      if (newText !== previousTextRef.current) {
+        console.log("📝 SLATE: Initial content changed, updating editor:", {
+          oldLength: previousTextRef.current.length,
+          newLength: newText.length
+        })
+        setValue(newValue)
+        previousTextRef.current = newText
+      } else {
+        console.log("🚫 SLATE: Initial content unchanged, skipping update")
+      }
     }
   }, [initialContent])
 
@@ -399,6 +388,13 @@ export const EditableContent = forwardRef<
     }
   }, [onFormatStateChange, isFormatActive])
 
+  // Track previous text to avoid unnecessary spell checks
+  const previousTextRef = useRef<string>("")
+  
+  // Rate limiting for spell checks (prevent spam)
+  const lastSpellCheckTimeRef = useRef<number>(0)
+  const SPELL_CHECK_RATE_LIMIT = 300 // Minimum 300ms between spell checks
+
   // Handle content changes
   const handleChange = useCallback((newValue: Descendant[]) => {
     setValue(newValue)
@@ -420,11 +416,29 @@ export const EditableContent = forwardRef<
       return
     }
     
-    // Only trigger spelling checks on content changes
-    // Grammar checks are now ONLY triggered by period/newline in handleKeyDown
-    if (documentId && plainText.trim()) {
-      // Immediate spell check (500ms delay)
-      debouncedSpellingCheckOnEdit(plainText, documentId)
+    // CRITICAL FIX: Only run spell check if text content actually changed + rate limiting
+    const previousText = previousTextRef.current
+    const now = Date.now()
+    const timeSinceLastCheck = now - lastSpellCheckTimeRef.current
+    
+    if (plainText !== previousText && documentId && plainText.trim()) {
+      if (timeSinceLastCheck >= SPELL_CHECK_RATE_LIMIT) {
+        console.log("🔤 SLATE: Text changed, triggering spell check:", {
+          oldLength: previousText.length,
+          newLength: plainText.length,
+          timeSinceLastCheck
+        })
+        previousTextRef.current = plainText
+        lastSpellCheckTimeRef.current = now
+        debouncedSpellingCheckOnEdit(plainText, documentId)
+      } else {
+        console.log("⏰ SLATE: Rate limited - spell check too soon:", {
+          timeSinceLastCheck,
+          rateLimitMs: SPELL_CHECK_RATE_LIMIT
+        })
+      }
+    } else if (plainText === previousText) {
+      console.log("🚫 SLATE: Text unchanged, skipping spell check (preventing infinite loop)")
     }
   }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, isAcceptingSuggestion, updateFormatState])
 

@@ -13,6 +13,7 @@ import { createEditor, Descendant, Editor, Text, Range, Node, Transforms, Operat
 import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { useSuggestStore } from "@/stores/useSuggestStore"
+import { useIdleGrammarCheck } from "@/hooks/useIdleGrammarCheck"
 import * as Popover from "@radix-ui/react-popover"
 import { Button } from "@/components/ui/button"
 
@@ -207,10 +208,103 @@ const SuggestionLeaf = ({ attributes, children, leaf }: any) => {
 const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref) => {
   const editor = useMemo(() => withHistory(withReact(createEditor())), [])
   const [value, setValue] = useState<Descendant[]>(initialValue)
+  const [isFocused, setIsFocused] = useState(false)
   const isAcceptingSuggestionRef = useRef(false)
   
-  const { getAllSuggestions, dismiss } = useSuggestStore()
+  const { getAllSuggestions, dismiss, addSuggestions, getDismissedIds } = useSuggestStore()
   const suggestions = getAllSuggestions()
+  
+  // Get current text for idle grammar checking
+  const currentText = useMemo(() => slateToText(value), [value])
+  
+  // Handle grammar suggestions from idle checker
+  const handleGrammarSuggestions = useCallback((grammarSuggestions: any[]) => {
+    console.log(`📝 Received ${grammarSuggestions.length} grammar suggestions from idle checker`)
+    
+    // Convert API suggestions to store format and add them
+    const storeSuggestions = grammarSuggestions.map(s => ({
+      id: s.id,
+      documentId: 'editor', // Temporary document ID for editor
+      versionNumber: 1,
+      originalText: s.originalText,
+      suggestedText: s.suggestedText,
+      explanation: s.explanation,
+      startOffset: s.startOffset,
+      endOffset: s.endOffset,
+      confidence: s.confidence.toString(),
+      suggestionType: s.suggestionType as 'grammar',
+      accepted: false,
+      dismissed: false,
+      createdAt: new Date()
+    }))
+    
+    addSuggestions(storeSuggestions)
+  }, [addSuggestions])
+  
+  // Set up idle grammar checking
+  const { triggerCheck, cancelCheck, isChecking } = useIdleGrammarCheck({
+    text: currentText,
+    isFocused,
+    onSuggestions: handleGrammarSuggestions,
+    dismissedIds: getDismissedIds(),
+    idleTimeout: 1000 // 1 second idle timeout
+  })
+
+  // Add initial mock suggestions for the demo text
+  useEffect(() => {
+    const initialText = slateToText(initialValue)
+    if (initialText.trim() && initialText.includes('misspeled') && suggestions.length === 0) {
+      console.log("🚀 Adding initial mock suggestions for demo text")
+      
+      // Create mock suggestions for the errors in the initial text
+      const mockSuggestions = [
+        {
+          id: 'mock-spell-1',
+          documentId: 'editor',
+          versionNumber: 1,
+          originalText: 'misspeled',
+          suggestedText: 'misspelled', 
+          explanation: 'Spelling correction',
+          startOffset: initialText.indexOf('misspeled'),
+          endOffset: initialText.indexOf('misspeled') + 'misspeled'.length,
+          confidence: '0.9',
+          suggestionType: 'spelling' as const,
+          accepted: false,
+          dismissed: false,
+          createdAt: new Date()
+        },
+        {
+          id: 'mock-spell-2', 
+          documentId: 'editor',
+          versionNumber: 1,
+          originalText: 'grammer',
+          suggestedText: 'grammar',
+          explanation: 'Spelling correction',
+          startOffset: initialText.indexOf('grammer'),
+          endOffset: initialText.indexOf('grammer') + 'grammer'.length,
+          confidence: '0.9',
+          suggestionType: 'spelling' as const,
+          accepted: false,
+          dismissed: false,
+          createdAt: new Date()
+        }
+      ]
+      
+      addSuggestions(mockSuggestions)
+    }
+  }, [addSuggestions, suggestions.length])
+
+  // Trigger initial grammar check for the mock text when component mounts
+  useEffect(() => {
+    const initialText = slateToText(initialValue)
+    if (initialText.trim() && initialText.includes('misspeled')) {
+      console.log("🚀 Triggering initial grammar check for mock text")
+      // Small delay to let the component fully initialize
+      setTimeout(() => {
+        triggerCheck()
+      }, 500)
+    }
+  }, [triggerCheck])
 
   useImperativeHandle(ref, () => ({
     acceptSuggestion: (id: string, replacement?: string) => {
@@ -250,8 +344,32 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     }
 
     const suggestion = suggestions.find(s => s.id === id)
-    if (!suggestion || !replacement || !suggestion.originalText) {
-      console.log("❌ Invalid suggestion or replacement:", { id, replacement, originalText: suggestion?.originalText })
+    console.log("🔍 Debug suggestion lookup:", { 
+      id, 
+      replacement, 
+      suggestion: suggestion ? {
+        id: suggestion.id,
+        originalText: suggestion.originalText,
+        suggestedText: suggestion.suggestedText,
+        startOffset: suggestion.startOffset,
+        endOffset: suggestion.endOffset
+      } : null,
+      allSuggestionsCount: suggestions.length,
+      allSuggestionIds: suggestions.map(s => s.id)
+    })
+
+    if (!suggestion) {
+      console.error("❌ Suggestion not found with ID:", id)
+      return
+    }
+
+    if (!replacement) {
+      console.error("❌ No replacement text provided")
+      return
+    }
+
+    if (!suggestion.originalText) {
+      console.error("❌ Suggestion missing originalText:", suggestion)
       return
     }
 
@@ -427,6 +545,31 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
 
   return (
     <div className="relative">
+      {/* Grammar check status indicator */}
+      {isChecking && (
+        <div className="absolute top-2 right-2 z-10 flex items-center space-x-2 bg-blue-50 border border-blue-200 text-blue-700 px-2 py-1 rounded-md text-xs">
+          <div className="animate-spin h-3 w-3 border border-blue-500 border-t-transparent rounded-full"></div>
+          <span>Checking grammar...</span>
+        </div>
+      )}
+      
+      {/* Debug panel */}
+      {suggestions.length > 0 && (
+        <div className="absolute top-2 left-2 z-10 bg-yellow-50 border border-yellow-200 p-2 rounded-md text-xs max-w-xs">
+          <p className="font-semibold mb-1">🐛 Debug: {suggestions.length} suggestions</p>
+          {suggestions.slice(0, 2).map(s => (
+            <div key={s.id} className="mb-1">
+              <button 
+                onClick={() => handleAcceptSuggestion(s.id, s.suggestedText || '')}
+                className="text-blue-600 hover:text-blue-800 underline text-xs mr-2"
+              >
+                Test Accept "{s.originalText}" → "{s.suggestedText}"
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      
       <Slate editor={editor} initialValue={value} onChange={handleChange}>
         <Editable
           decorate={decorate}
@@ -438,11 +581,32 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
             fontSize: '16px',
             lineHeight: '1.6',
           }}
+          onFocus={() => {
+            console.log("📝 Editor focused")
+            setIsFocused(true)
+          }}
+          onBlur={() => {
+            console.log("📝 Editor blurred")
+            setIsFocused(false)
+            cancelCheck() // Cancel any pending grammar check when losing focus
+          }}
           onKeyDown={(event) => {
             // Prevent operations during suggestion acceptance
             if (isAcceptingSuggestionRef.current) {
               event.preventDefault()
               return
+            }
+
+            // Cancel any pending grammar check when user starts typing
+            cancelCheck()
+
+            // Detect period for immediate grammar check
+            if (event.key === '.' && isFocused) {
+              // Schedule grammar check after a short delay to let the text update
+              setTimeout(() => {
+                console.log("🎯 Period detected - triggering immediate grammar check")
+                triggerCheck()
+              }, 100)
             }
 
             // Basic formatting shortcuts

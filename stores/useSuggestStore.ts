@@ -57,11 +57,13 @@ interface SuggestStore {
   // Actions
   merge: (revision: number, incoming: Suggestion[]) => void
   dismiss: (id: string) => void
+  addSuggestions: (suggestions: Suggestion[]) => void
   
   // Getters
   getAllSuggestions: () => Suggestion[]
   getSuggestionById: (id: string) => Suggestion | undefined
   isDismissed: (id: string) => boolean
+  getDismissedIds: () => string[]
   
   // Utilities
   clearAll: () => void
@@ -132,6 +134,32 @@ export const useSuggestStore = create<SuggestStore>()(
       saveDismissedToStorage(newDismissed)
     },
     
+    addSuggestions: (suggestions: Suggestion[]) => {
+      const state = get()
+      const newById = { ...state.byId }
+      let addedCount = 0
+      let dismissedCount = 0
+      
+      // Process incoming suggestions
+      for (const suggestion of suggestions) {
+        // Skip if suggestion is dismissed
+        if (state.dismissed.has(suggestion.id)) {
+          dismissedCount++
+          continue
+        }
+        
+        // Add suggestion (will overwrite if exists)
+        newById[suggestion.id] = suggestion
+        addedCount++
+      }
+      
+      console.log(`➕ Added suggestions: ${addedCount} added, ${dismissedCount} dismissed`)
+      
+      set({
+        byId: newById
+      })
+    },
+    
     // Getters
     getAllSuggestions: () => {
       return Object.values(get().byId)
@@ -143,6 +171,10 @@ export const useSuggestStore = create<SuggestStore>()(
     
     isDismissed: (id: string) => {
       return get().dismissed.has(id)
+    },
+    
+    getDismissedIds: () => {
+      return Array.from(get().dismissed)
     },
     
     // Utilities

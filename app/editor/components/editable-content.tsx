@@ -12,6 +12,7 @@ import {
 } from "react"
 import { checkGrammarWithLanguageToolAction } from "@/actions/languagetool-actions"
 import { checkSpellingWithLanguageToolAction, checkGrammarOnlyWithLanguageToolAction } from "@/actions/languagetool-actions"
+import { checkSpellingOptimizedAction } from "@/actions/languagetool-actions-optimized"
 import { checkGrammarWithOpenAIAction } from "@/actions/openai-grammar-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
@@ -65,6 +66,7 @@ interface EditableContentProps {
   documentId?: string
   onSuggestionClick?: (suggestion: Suggestion) => void
   onSuggestionsUpdated?: () => void
+  onDirectSuggestionsUpdate?: (suggestions: Suggestion[]) => void // New: direct update to avoid DB round-trip
   suggestions?: Suggestion[] // Add suggestions as props
   isAcceptingSuggestion?: boolean // Add lock state to prevent concurrent operations
 }
@@ -84,6 +86,8 @@ export interface EditableContentRef {
   focus: () => void
   acceptSuggestion: (suggestion: Suggestion) => void
 }
+
+
 
 // Custom leaf component for rendering suggestions
 const Leaf = ({ attributes, children, leaf }: any) => {
@@ -178,7 +182,7 @@ const slateToHtml = (nodes: Descendant[]): string => {
 export const EditableContent = forwardRef<
   EditableContentRef,
   EditableContentProps
->(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, suggestions: propSuggestions = [], isAcceptingSuggestion = false }, ref) => {
+>(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, onDirectSuggestionsUpdate, suggestions: propSuggestions = [], isAcceptingSuggestion = false }, ref) => {
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
@@ -242,39 +246,47 @@ export const EditableContent = forwardRef<
   const debouncedSpellCheck = useCallback(
     debounce(async (text: string, docId: string, wordStart?: number, wordEnd?: number) => {
       try {
-        console.log("🔤 SLATE: Running spell check...")
+        console.log("🔤 SLATE: Running instant spell check...")
         
-        const result = await checkSpellingWithLanguageToolAction(text, docId, wordStart, wordEnd)
+        const result = await checkSpellingOptimizedAction(text, docId, wordStart, wordEnd)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
           console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
           
-          // Re-sync with database to get updated suggestions
-          if (onSuggestionsUpdated) {
+          // Try direct update first (faster), fallback to database refresh
+          if (onDirectSuggestionsUpdate) {
+            console.log("🚀 SLATE: Using direct suggestions update for instant space-trigger feedback")
+            onDirectSuggestionsUpdate(result.data)
+          } else if (onSuggestionsUpdated) {
+            console.log("🔄 SLATE: Using database refresh for space-trigger (slower fallback)")
             onSuggestionsUpdated()
           }
         }
       } catch (error) {
         console.error("❌ SLATE: Spell check error:", error)
       }
-    }, 100), // Very short delay for spell checking - almost immediate
-    [onSuggestionsUpdated]
+    }, 50), // Ultra-fast for instant feedback (50ms)
+    [onSuggestionsUpdated, onDirectSuggestionsUpdate]
   )
 
   const debouncedSpellingCheckOnEdit = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
         setIsCheckingGrammar(true) // Keep this state name for now
-        console.log("🔤 SLATE: Running spell check on content change...")
+        console.log("🔤 SLATE: Running fast spell check on content change...")
         
-        // Use the corrected spelling function
-        const result = await checkSpellingWithLanguageToolAction(text, docId)
+        // Use the optimized spelling function
+        const result = await checkSpellingOptimizedAction(text, docId)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
           console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
           
-          // Re-sync with database to ensure dismissed suggestions are properly filtered
-          if (onSuggestionsUpdated) {
+          // Try direct update first (faster), fallback to database refresh
+          if (onDirectSuggestionsUpdate) {
+            console.log("🚀 SLATE: Using direct suggestions update for instant feedback")
+            onDirectSuggestionsUpdate(result.data)
+          } else if (onSuggestionsUpdated) {
+            console.log("🔄 SLATE: Using database refresh (slower fallback)")
             onSuggestionsUpdated()
           }
         }
@@ -283,8 +295,8 @@ export const EditableContent = forwardRef<
       } finally {
         setIsCheckingGrammar(false)
       }
-    }, 500), // Faster for spelling checks
-    [onSuggestionsUpdated]
+    }, 150), // Even faster for ultra-responsive spelling (150ms)
+    [onSuggestionsUpdated, onDirectSuggestionsUpdate]
   )
 
   // New OpenRouter-based grammar checking with faster delay
@@ -532,11 +544,11 @@ export const EditableContent = forwardRef<
       setTimeout(() => {
         const currentText = slateToText(value)
         if (currentText.trim() && documentId) {
-          console.log("🔤 SLATE: Spacebar pressed, triggering immediate spell check")
+          console.log("🔤 SLATE: Spacebar pressed, triggering instant spell check")
           // Use the immediate spell check function (not the content change one)
           debouncedSpellCheck(currentText, documentId)
         }
-      }, 50)
+      }, 25) // Even faster spacebar response (25ms)
     }
 
     // Handle period for grammar checking

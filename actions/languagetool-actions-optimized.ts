@@ -95,6 +95,9 @@ export async function checkSpellingOptimizedAction(
 ): Promise<ActionState<Suggestion[]>> {
   try {
     console.log("🚀 OPTIMIZED: Fast spell check starting - text length:", text.length)
+    console.log("🚀 OPTIMIZED: Input text:", `"${text}"`)
+    console.log("🚀 OPTIMIZED: Document ID:", documentId)
+    console.log("🚀 OPTIMIZED: Word range filter:", wordStartOffset, "to", wordEndOffset)
     
     const { userId } = await auth()
     if (!userId) {
@@ -107,6 +110,7 @@ export async function checkSpellingOptimizedAction(
 
     // STEP 1: Get cached response or call API (fastest path)
     let languageToolResponse = await getCachedSpellingResponse(text)
+    let wasFromCache = false
     
     if (!languageToolResponse) {
       console.log("🚀 OPTIMIZED: Calling LanguageTool API...")
@@ -127,14 +131,35 @@ export async function checkSpellingOptimizedAction(
 
       languageToolResponse = JSON.parse(await response.text()) as LanguageToolResponse
       setCachedSpellingResponse(text, languageToolResponse) // Fire and forget
+    } else {
+      console.log("🚀 OPTIMIZED: Using cached LanguageTool response")
+      wasFromCache = true
     }
 
+    // ALWAYS log the response for debugging (even cached ones)
+    console.log("🚀 OPTIMIZED: LanguageTool response (cached=" + wasFromCache + "):", JSON.stringify(languageToolResponse, null, 2))
+
     // STEP 2: Filter spelling matches efficiently
+    const allMatches = languageToolResponse.matches
+    console.log("🚀 OPTIMIZED: Total matches from LanguageTool:", allMatches.length)
+    allMatches.forEach((match, index) => {
+      const matchText = text.substring(match.offset, match.offset + match.length)
+      console.log(`  ${index + 1}. Match "${matchText}" (${match.offset}-${match.offset + match.length}) - Category: ${match.rule.category.id}, Type: ${match.type.typeName}, Rule: ${match.rule.id}`)
+      console.log(`     → Message: ${match.message}`)
+      console.log(`     → Replacements: ${match.replacements?.map(r => r.value).join(', ') || 'none'}`)
+    })
+
     const spellingMatches = languageToolResponse.matches.filter(match => 
       match.rule.category.id === 'TYPOS' || 
       match.type.typeName === 'UnknownWord' ||
       (match.type.typeName === 'Other' && match.rule.category.name === 'Possible Typo')
     )
+
+    console.log("🚀 OPTIMIZED: Filtered spelling matches:", spellingMatches.length)
+    spellingMatches.forEach((match, index) => {
+      const matchText = text.substring(match.offset, match.offset + match.length)
+      console.log(`  ${index + 1}. Spelling match "${matchText}" (${match.offset}-${match.offset + match.length}) - Message: ${match.message}`)
+    })
 
     // Apply word range filter if provided
     const filteredMatches = wordStartOffset !== undefined && wordEndOffset !== undefined
@@ -145,7 +170,7 @@ export async function checkSpellingOptimizedAction(
         })
       : spellingMatches
 
-    console.log("🚀 OPTIMIZED: Processing", filteredMatches.length, "spelling matches")
+    console.log("🚀 OPTIMIZED: After range filtering:", filteredMatches.length, "matches")
 
     if (filteredMatches.length === 0) {
       return { isSuccess: true, message: "No spelling errors found", data: [] }
@@ -182,13 +207,41 @@ export async function checkSpellingOptimizedAction(
         const originalText = text.substring(match.offset, match.offset + match.length)
         const suggestedText = match.replacements?.[0]?.value || null
 
+        console.log(`🚀 OPTIMIZED: Processing match "${originalText}" (${match.offset}-${match.offset + match.length}) -> "${suggestedText}"`)
+
+        // ENHANCED VALIDATION: Skip suggestions for incomplete words
+        if (originalText.length < 2) {
+          console.log("🚀 OPTIMIZED: Skipping very short word:", originalText)
+          continue
+        }
+
+        // Check if this appears to be a partial word by looking at surrounding characters
+        const beforeChar = match.offset > 0 ? text[match.offset - 1] : ' '
+        const afterChar = match.offset + match.length < text.length ? text[match.offset + match.length] : ' '
+        
+        console.log(`🚀 OPTIMIZED: Context check for "${originalText}": before="${beforeChar}" after="${afterChar}"`)
+        
+        // Skip if the word appears to be incomplete (no spaces around it and it's short)
+        const isIncompleteWord = /[a-zA-Z]/.test(beforeChar) || /[a-zA-Z]/.test(afterChar)
+        if (isIncompleteWord && originalText.length < 4) {
+          console.log("🚀 OPTIMIZED: Skipping potentially incomplete word:", originalText, {
+            beforeChar,
+            afterChar,
+            length: originalText.length
+          })
+          continue
+        }
+
         // Check if already dismissed (in memory)
         const isDismissed = allDismissedSuggestions.some(dismissed =>
           dismissed.originalText === originalText && 
           dismissed.suggestedText === suggestedText
         )
 
-        if (isDismissed) continue
+        if (isDismissed) {
+          console.log("🚀 OPTIMIZED: Skipping dismissed suggestion:", originalText)
+          continue
+        }
 
         // Check if already exists (in memory)
         const existing = existingSpellingSuggestions.find(existing => 
@@ -199,8 +252,30 @@ export async function checkSpellingOptimizedAction(
         )
 
         if (existing) {
+          console.log("🚀 OPTIMIZED: Found existing suggestion:", existing.id.substring(0, 8))
           validExistingSuggestionIds.add(existing.id)
         } else {
+          console.log("🚀 OPTIMIZED: Creating new suggestion for:", originalText, "->", suggestedText)
+          
+          // CRITICAL DEBUG: Validate offsets before storing
+          const validationText = text.substring(match.offset, match.offset + match.length)
+          if (validationText !== originalText) {
+            console.error("🚨 OFFSET MISMATCH DETECTED DURING CREATION!")
+            console.error("  Expected (from LanguageTool):", originalText)
+            console.error("  Actual (from our offset):", validationText)
+            console.error("  LanguageTool offset:", match.offset, "-", match.offset + match.length)
+            console.error("  Full text:", `"${text}"`)
+            console.error("  Text length:", text.length)
+            console.error("  Context around offset:")
+            const contextStart = Math.max(0, match.offset - 10)
+            const contextEnd = Math.min(text.length, match.offset + match.length + 10)
+            console.error("    ", `"${text.substring(contextStart, contextEnd)}"`)
+            console.error("    ", " ".repeat(match.offset - contextStart) + "^".repeat(match.length))
+            
+            // Skip this suggestion since it has invalid offsets
+            continue
+          }
+          
           // Queue for batch insert
           newSuggestions.push({
             documentId,
@@ -213,6 +288,13 @@ export async function checkSpellingOptimizedAction(
             suggestionType: 'spelling',
             confidence: "0.9",
             accepted: false
+          })
+          
+          console.log("🚀 OPTIMIZED: ✅ Validated and queued suggestion:", {
+            originalText,
+            suggestedText,
+            offsets: `${match.offset}-${match.offset + match.length}`,
+            validationText
           })
         }
       } catch (error) {

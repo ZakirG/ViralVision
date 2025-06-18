@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -336,28 +336,10 @@ export default function GrammarlyEditor() {
       return
     }
     
-    console.log("🔄 PARENT: refreshSuggestions called for documentId:", documentId)
-    
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
       if (result.isSuccess && result.data) {
-        console.log("🔄 PARENT: Retrieved", result.data.length, "suggestions from DB:", 
-          result.data.map(s => ({ id: s.id, text: s.suggestedText })))
-        
-        // Database query already filters out accepted and dismissed suggestions
-        setRealSuggestions(prev => {
-          console.log("🔄 PARENT: UPDATING realSuggestions:", {
-            previousCount: prev.length,
-            previousIds: prev.map(s => s.id),
-            newCount: result.data.length,
-            newIds: result.data.map(s => s.id),
-            idsChanged: !prev.every(p => result.data.some(n => n.id === p.id)) || prev.length !== result.data.length
-          })
-          return result.data
-        })
-        console.log("🔄 PARENT: Updated realSuggestions state with", result.data.length, "suggestions")
-      } else {
-        console.log("🔄 PARENT: refreshSuggestions failed or no data:", result)
+        setRealSuggestions(result.data)
       }
     } catch (error) {
       console.error("🔄 PARENT: Error refreshing suggestions:", error)
@@ -603,6 +585,13 @@ export default function GrammarlyEditor() {
     }
   }, [documentId, document, refreshSuggestions])
 
+  // Use real suggestions from database instead of mock data
+  // CRITICAL FIX: Stabilize suggestions prop to prevent cursor jumping
+  // Only create new reference when suggestion IDs actually change
+  const suggestions = useMemo(() => {
+    return realSuggestions
+  }, [realSuggestions.map(s => s.id).sort().join(',')]) // Only change when IDs change
+
   // Show loading state - this early return is now AFTER all hooks
   if (loading || !isLoaded) {
     return (
@@ -621,9 +610,6 @@ export default function GrammarlyEditor() {
   if (!isSignedIn) {
     return null
   }
-
-  // Use real suggestions from database instead of mock data
-  const suggestions = realSuggestions
 
   const tabs = [
     { id: "correctness", label: "Correctness", color: "bg-red-500", score: 85 },

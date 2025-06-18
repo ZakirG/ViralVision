@@ -164,7 +164,15 @@ const slateToText = (nodes: Descendant[]): string => {
     }
   })
   
-  return parts.join('')
+  const result = parts.join('')
+  // REMOVED: Excessive logging that was spamming console
+  // console.log(`🔍 TEXT: slateToText called, input nodes:`, nodes.length, `output: "${result}" (length: ${result.length})`)
+  // nodes.forEach((node, i) => {
+  //   const nodeText = Node.string(node)
+  //   console.log(`  Node ${i}: "${nodeText}" (length: ${nodeText.length})`)
+  // })
+  
+  return result
 }
 
 // Convert Slate nodes to HTML (preserving formatting)
@@ -190,12 +198,13 @@ export const EditableContent = forwardRef<
   // Use suggestions from props instead of internal state
   const suggestions = propSuggestions
 
-  // Debug prop suggestions - helps identify continuous updates
-  useEffect(() => {
-    console.log(`🎨 PROPS: Received ${suggestions.length} suggestions from parent (should not trigger continuously when idle):`, 
-      suggestions.map(s => ({ id: s.id.substring(0, 8), text: s.suggestedText?.substring(0, 20), dismissed: s.dismissed }))
-    )
-  }, [suggestions])
+  // Add render counter and cursor tracking
+  const renderCountRef = useRef(0)
+  const lastCursorPositionRef = useRef<Range | null>(null)
+  
+  renderCountRef.current += 1
+  // REMOVED: Excessive render logging
+  // console.log(`🔄 SMART: Component render #${renderCountRef.current}`)
 
   // Create Slate editor with plugins
   const editor = useMemo(
@@ -203,163 +212,188 @@ export const EditableContent = forwardRef<
     []
   )
 
+  // Track cursor position changes - ONLY log when cursor actually jumps unexpectedly
+  useEffect(() => {
+    const currentSelection = editor.selection
+    const lastSelection = lastCursorPositionRef.current
+    
+    if (currentSelection !== lastSelection) {
+      // Only log if cursor jumps to beginning unexpectedly
+      if (currentSelection && currentSelection.anchor.offset === 0 && lastSelection && lastSelection.anchor.offset > 10) {
+        console.error(`🚨 CURSOR JUMP DETECTED: Position changed on render #${renderCountRef.current}:`, {
+          from: lastSelection ? `${lastSelection.anchor.path}:${lastSelection.anchor.offset}` : 'null',
+          to: currentSelection ? `${currentSelection.anchor.path}:${currentSelection.anchor.offset}` : 'null',
+          isCollapsed: currentSelection ? Range.isCollapsed(currentSelection) : false
+        })
+      }
+      lastCursorPositionRef.current = currentSelection
+    }
+  })
+
+  // Preserve cursor position during updates
+  const preservedSelectionRef = useRef<Range | null>(null)
+
   // Initialize Slate value from initial content
   const [value, setValue] = useState<Descendant[]>(() => {
     return htmlToSlate(initialContent)
   })
 
-  // REMOVED: The problematic re-render loop that was causing continuous API calls
-  // Slate will automatically re-render decorations when suggestions change via the decorate function
-
-  // Update editor when initialContent changes (e.g., when suggestion is accepted)
+  // Use refs for stable access to latest values without causing re-renders
+  const onContentChangeRef = useRef(onContentChange)
+  const documentIdRef = useRef(documentId)
+  const isAcceptingSuggestionRef = useRef(isAcceptingSuggestion)
+  
+  // Update refs when props change, but don't trigger re-renders
   useEffect(() => {
-    if (initialContent) {
-      const newValue = htmlToSlate(initialContent)
-      const newText = slateToText(newValue)
+    onContentChangeRef.current = onContentChange
+    documentIdRef.current = documentId
+    isAcceptingSuggestionRef.current = isAcceptingSuggestion
+  })
+
+  // Handle initialContent changes (e.g., when suggestion is accepted) - STABLE VERSION
+  useEffect(() => {
+    if (!initialContent) return
+
+    const newValue = htmlToSlate(initialContent)
+    const newText = slateToText(newValue)
+    const currentText = slateToText(value)
+    
+    // Only update if the content actually changed 
+    if (newText !== currentText && newText !== previousTextRef.current) {
+      // Preserve the current selection before updating
+      if (editor.selection) {
+        preservedSelectionRef.current = editor.selection
+      }
       
-      // Only update if the content actually changed to prevent loops
-      if (newText !== previousTextRef.current) {
-        console.log("📝 SLATE: Initial content changed, updating editor:", {
-          oldLength: previousTextRef.current.length,
-          newLength: newText.length
-        })
-        setValue(newValue)
-        previousTextRef.current = newText
-      } else {
-        console.log("🚫 SLATE: Initial content unchanged, skipping update")
+      setValue(newValue)
+      previousTextRef.current = newText
+      
+      // Restore selection after a short delay to allow the update to process
+      if (preservedSelectionRef.current) {
+        setTimeout(() => {
+          try {
+            if (preservedSelectionRef.current && editor.selection !== preservedSelectionRef.current) {
+              Transforms.select(editor, preservedSelectionRef.current)
+            }
+          } catch (error) {
+            // Silent fallback
+          }
+          preservedSelectionRef.current = null
+        }, 10)
       }
     }
-  }, [initialContent])
+  }, [initialContent]) // Only depend on initialContent, not value or editor
 
-  // Separate debounced functions for spell and grammar checking
-  const debouncedSpellCheck = useCallback(
-    debounce(async (text: string, docId: string, wordStart?: number, wordEnd?: number) => {
-      try {
-        console.log("🔤 SLATE: Running instant spell check...")
-        
-        const result = await checkSpellingOptimizedAction(text, docId, wordStart, wordEnd)
-        
-        if (result.isSuccess && result.data && Array.isArray(result.data)) {
-          console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
-          
-          // Try direct update first (faster), fallback to database refresh
-          if (onDirectSuggestionsUpdate) {
-            console.log("🚀 SLATE: Using direct suggestions update for instant space-trigger feedback")
-            onDirectSuggestionsUpdate(result.data)
-          } else if (onSuggestionsUpdated) {
-            console.log("🔄 SLATE: Using database refresh for space-trigger (slower fallback)")
-            onSuggestionsUpdated()
-          }
-        }
-      } catch (error) {
-        console.error("❌ SLATE: Spell check error:", error)
-      }
-    }, 50), // Ultra-fast for instant feedback (50ms)
-    [onSuggestionsUpdated, onDirectSuggestionsUpdate]
-  )
+  // Debug prop suggestions but DON'T cause re-renders
+  useEffect(() => {
+    // REMOVED: All excessive logging
+    // Only run this effect when suggestions actually change
+  }, [suggestions.length, suggestions.map(s => s.id).join(',')]) // STABLE: Only re-run when count or IDs change
 
-  const debouncedSpellingCheckOnEdit = useCallback(
+  // Track previous text to avoid unnecessary checks
+  const previousTextRef = useRef<string>("")
+  const lastSpellCheckTimeRef = useRef<number>(0)
+  const WORD_COMPLETION_DELAY = 800 // Wait 800ms after user stops typing to check
+
+  // Add debug for key callbacks that might be changing
+  const stableDebouncedWordCompleteSpellCheck = useCallback(
     debounce(async (text: string, docId: string) => {
       try {
-        setIsCheckingGrammar(true) // Keep this state name for now
-        console.log("🔤 SLATE: Running fast spell check on content change...")
+        // Preserve cursor position before API call
+        const selectionBeforeCheck = editor.selection
         
-        // Use the optimized spelling function
         const result = await checkSpellingOptimizedAction(text, docId)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
-          console.log("🔤 SLATE: Spell check returned", result.data.length, "spelling suggestions")
-          
-          // Try direct update first (faster), fallback to database refresh
+          // Update suggestions but preserve cursor position
           if (onDirectSuggestionsUpdate) {
-            console.log("🚀 SLATE: Using direct suggestions update for instant feedback")
             onDirectSuggestionsUpdate(result.data)
           } else if (onSuggestionsUpdated) {
-            console.log("🔄 SLATE: Using database refresh (slower fallback)")
             onSuggestionsUpdated()
           }
-        }
-      } catch (error) {
-        console.error("❌ SLATE: Spell check error:", error)
-      } finally {
-        setIsCheckingGrammar(false)
-      }
-    }, 150), // Even faster for ultra-responsive spelling (150ms)
-    [onSuggestionsUpdated, onDirectSuggestionsUpdate]
-  )
-
-  // New OpenRouter-based grammar checking with faster delay
-  const debouncedGrammarCheckWithAI = useCallback(
-    debounce(async (text: string, docId: string) => {
-      // Skip if already checking grammar to prevent overlapping requests
-      if (isGrammarCheckInProgress) {
-        console.log("🤖 SLATE: Grammar check already in progress, skipping...")
-        return
-      }
-
-      try {
-        setIsGrammarCheckInProgress(true)
-        setIsCheckingGrammar(true)
-        console.log("🤖🤖🤖 SLATE: CALLING OPENROUTER AI GRAMMAR CHECK (debounced) 🤖🤖🤖")
-        console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
-        console.log("🤖 SLATE: Document ID:", docId)
-        
-        // Use OpenAI for grammar analysis
-        const result = await checkGrammarWithOpenAIAction(text, docId)
-        
-        if (result.isSuccess && result.data && Array.isArray(result.data)) {
-          console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
           
-          // Re-sync with database to get all suggestions (spelling + grammar)
-          if (onSuggestionsUpdated) {
-            onSuggestionsUpdated()
-          }
+          // Restore cursor position if it was lost during suggestion update
+          setTimeout(() => {
+            if (selectionBeforeCheck && !editor.selection) {
+              try {
+                Transforms.select(editor, selectionBeforeCheck)
+              } catch (error) {
+                // Silent fallback
+              }
+            }
+          }, 10)
         }
       } catch (error) {
-        console.error("❌ SLATE: AI grammar check error:", error)
-      } finally {
-        setIsCheckingGrammar(false)
-        setIsGrammarCheckInProgress(false)
+        // Silent error handling
       }
-    }, 1000), // Faster delay for AI grammar checks (1 second)
-    [onSuggestionsUpdated, isGrammarCheckInProgress]
+    }, WORD_COMPLETION_DELAY),
+    [onSuggestionsUpdated, onDirectSuggestionsUpdate, editor]
   )
 
-  // Immediate grammar check for punctuation triggers (period, newline)
-  const immediateGrammarCheck = useCallback(async (text: string, docId: string, trigger: string) => {
-    // Skip if already checking grammar to prevent overlapping requests
+  // Fast grammar check for sentence completion (period/newline)
+  const sentenceCompleteGrammarCheck = useCallback(async (text: string, docId: string, trigger: string) => {
     if (isGrammarCheckInProgress) {
-      console.log(`🤖 SLATE: Grammar check already in progress, skipping ${trigger} trigger...`)
       return
     }
 
     try {
+      // Preserve cursor position before API call
+      const selectionBeforeCheck = editor.selection
+      
       setIsGrammarCheckInProgress(true)
       setIsCheckingGrammar(true)
-      console.log(`🤖🤖🤖 SLATE: IMMEDIATE GRAMMAR CHECK (${trigger} trigger) 🤖🤖🤖`)
-      console.log("🤖 SLATE: Text being sent to OpenRouter:", text)
-      console.log("🤖 SLATE: Document ID:", docId)
       
-      // Use OpenAI for grammar analysis
       const result = await checkGrammarWithOpenAIAction(text, docId)
       
       if (result.isSuccess && result.data && Array.isArray(result.data)) {
-        console.log("🤖 SLATE: AI grammar check returned", result.data.length, "grammar suggestions")
-        
-        // Re-sync with database to get all suggestions (spelling + grammar)
         if (onSuggestionsUpdated) {
           onSuggestionsUpdated()
         }
+        
+        // Restore cursor position if it was lost during suggestion update
+        setTimeout(() => {
+          if (selectionBeforeCheck && !editor.selection) {
+            try {
+              Transforms.select(editor, selectionBeforeCheck)
+            } catch (error) {
+              // Silent fallback
+            }
+          }
+        }, 10)
       }
     } catch (error) {
-      console.error("❌ SLATE: AI grammar check error:", error)
+      // Silent error handling
     } finally {
       setIsCheckingGrammar(false)
       setIsGrammarCheckInProgress(false)
     }
-  }, [onSuggestionsUpdated, isGrammarCheckInProgress])
+  }, [onSuggestionsUpdated, isGrammarCheckInProgress, editor])
 
-  // Format toggle functions
+  // Detect if user just completed a word (typed space after letters)
+  const isWordBoundary = useCallback((currentText: string, previousText: string): boolean => {
+    if (currentText.length <= previousText.length) return false
+    
+    const lastChar = currentText[currentText.length - 1]
+    const isSpaceOrPunctuation = /[\s.,!?;:]/.test(lastChar)
+    
+    if (!isSpaceOrPunctuation) return false
+    
+    // Check if there were letters before this boundary
+    const beforeBoundary = currentText.slice(0, -1)
+    const hasLettersAtEnd = /[a-zA-Z]+$/.test(beforeBoundary)
+    
+    return hasLettersAtEnd
+  }, [])
+
+  // Detect if user completed a sentence (typed period, exclamation, question mark)
+  const isSentenceBoundary = useCallback((currentText: string, previousText: string): boolean => {
+    if (currentText.length <= previousText.length) return false
+    
+    const lastChar = currentText[currentText.length - 1]
+    return /[.!?]/.test(lastChar)
+  }, [])
+
+  // Format toggle functions (moved above handleChange to fix dependency order)
   const toggleFormat = useCallback((format: 'bold' | 'italic' | 'underline') => {
     const isActive = Editor.marks(editor)?.[format] === true
     
@@ -388,65 +422,216 @@ export const EditableContent = forwardRef<
     }
   }, [onFormatStateChange, isFormatActive])
 
-  // Track previous text to avoid unnecessary spell checks
-  const previousTextRef = useRef<string>("")
-  
-  // Rate limiting for spell checks (prevent spam)
-  const lastSpellCheckTimeRef = useRef<number>(0)
-  const SPELL_CHECK_RATE_LIMIT = 300 // Minimum 300ms between spell checks
-
-  // Handle content changes
+  // COMPLETELY STABLE handleChange - no dependencies that change
   const handleChange = useCallback((newValue: Descendant[]) => {
+    // Preserve the current selection immediately
+    const currentSelection = editor.selection
+    
     setValue(newValue)
     
-    // Update format state when content or selection changes
-    updateFormatState()
+    // Call updateFormatState directly instead of through dependency
+    if (onFormatStateChange) {
+      onFormatStateChange({
+        isBold: (Editor.marks(editor)?.bold === true),
+        isItalic: (Editor.marks(editor)?.italic === true),
+        isUnderlined: (Editor.marks(editor)?.underline === true),
+        isBulletList: false, 
+        isNumberedList: false
+      })
+    }
     
-    // Convert to text for checking
     const plainText = slateToText(newValue)
-    
-    // Convert to HTML for saving (preserve formatting)
     const htmlContent = slateToHtml(newValue)
+    onContentChangeRef.current(htmlContent)
     
-    onContentChange(htmlContent)
-    
-    // Skip all checks if accepting a suggestion to avoid race conditions
-    if (isAcceptingSuggestion) {
-      console.log("🔄 SLATE: Skipping all checks - currently accepting a suggestion")
+    if (isAcceptingSuggestionRef.current) {
       return
     }
     
-    // CRITICAL FIX: Only run spell check if text content actually changed + rate limiting
     const previousText = previousTextRef.current
-    const now = Date.now()
-    const timeSinceLastCheck = now - lastSpellCheckTimeRef.current
     
-    if (plainText !== previousText && documentId && plainText.trim()) {
-      if (timeSinceLastCheck >= SPELL_CHECK_RATE_LIMIT) {
-        console.log("🔤 SLATE: Text changed, triggering spell check:", {
-          oldLength: previousText.length,
-          newLength: plainText.length,
-          timeSinceLastCheck
-        })
-        previousTextRef.current = plainText
-        lastSpellCheckTimeRef.current = now
-        debouncedSpellingCheckOnEdit(plainText, documentId)
-      } else {
-        console.log("⏰ SLATE: Rate limited - spell check too soon:", {
-          timeSinceLastCheck,
-          rateLimitMs: SPELL_CHECK_RATE_LIMIT
-        })
-      }
-    } else if (plainText === previousText) {
-      console.log("🚫 SLATE: Text unchanged, skipping spell check (preventing infinite loop)")
+    // Only proceed if text actually changed
+    if (plainText === previousText || !documentIdRef.current || !plainText.trim()) {
+      return
     }
-  }, [onContentChange, documentId, debouncedSpellingCheckOnEdit, isAcceptingSuggestion, updateFormatState])
+    
+    // Preserve selection state to prevent cursor jumping
+    if (currentSelection) {
+      preservedSelectionRef.current = currentSelection
+    }
+    
+    // Check for word completion (space after letters)
+    const isWordComplete = (() => {
+      if (plainText.length <= previousText.length) return false
+      const lastChar = plainText[plainText.length - 1]
+      const isSpaceOrPunctuation = /[\s.,!?;:]/.test(lastChar)
+      if (!isSpaceOrPunctuation) return false
+      const beforeBoundary = plainText.slice(0, -1)
+      const hasLettersAtEnd = /[a-zA-Z]+$/.test(beforeBoundary)
+      return hasLettersAtEnd
+    })()
+    
+         if (isWordComplete && documentIdRef.current) {
+       stableDebouncedWordCompleteSpellCheck(plainText, documentIdRef.current)
+     }
+     
+     // Check for sentence completion (period, etc.)
+     const isSentenceComplete = (() => {
+       if (plainText.length <= previousText.length) return false
+       const lastChar = plainText[plainText.length - 1]
+       return /[.!?]/.test(lastChar)
+     })()
+     
+     if (isSentenceComplete && documentIdRef.current) {
+       sentenceCompleteGrammarCheck(plainText, documentIdRef.current, 'sentence-end')
+     }
+    
+    // Always update previous text after checks
+    previousTextRef.current = plainText
+    
+  }, [editor, onFormatStateChange]) // MINIMAL: Only stable dependencies
 
-  // Create decorations for suggestions
+  // Simplified keyboard handler - only for shortcuts and Enter grammar check
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (isAcceptingSuggestionRef.current) return
+
+         // Handle Enter for grammar check
+     if (event.key === 'Enter' && documentIdRef.current) {
+       setTimeout(() => {
+         const currentText = slateToText(value)
+         if (currentText.trim() && documentIdRef.current) {
+           sentenceCompleteGrammarCheck(currentText, documentIdRef.current, 'enter')
+         }
+       }, 100)
+     }
+    
+    // Handle formatting shortcuts
+    if (!event.ctrlKey && !event.metaKey) return
+      
+    switch (event.key) {
+      case 'b':
+        event.preventDefault()
+        toggleFormat('bold')
+        break
+      case 'i':
+        event.preventDefault()
+        toggleFormat('italic')
+        break
+      case 'u':
+        event.preventDefault()
+        toggleFormat('underline')
+        break
+    }
+  }, [documentIdRef, isAcceptingSuggestionRef, value, sentenceCompleteGrammarCheck, toggleFormat])
+
+  // Accept suggestion by replacing text in the editor - STABILIZED VERSION
+  const acceptSuggestion = useCallback((suggestion: Suggestion) => {
+    console.log("🎯 SMART: acceptSuggestion called with:", {
+      id: suggestion.id,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset,
+      suggestedText: suggestion.suggestedText,
+      originalText: suggestion.originalText
+    })
+    
+    if (suggestion.startOffset == null || suggestion.endOffset == null || !suggestion.suggestedText) {
+      console.error("🎯 SMART: Invalid suggestion data for acceptance:", suggestion)
+      return
+    }
+      
+    console.log("🎯 SMART: Accepting suggestion:", {
+      id: suggestion.id,
+      startOffset: suggestion.startOffset,
+      endOffset: suggestion.endOffset,
+      originalText: suggestion.originalText,
+      suggestedText: suggestion.suggestedText
+    })
+
+    // Convert the current editor value to text to verify positioning
+    const fullText = slateToText(editor.children) // Use editor.children directly instead of value
+    console.log("🎯 SMART: Full text:", `"${fullText}"`)
+    console.log("🎯 SMART: Text to replace:", `"${fullText.substring(suggestion.startOffset, suggestion.endOffset)}"`)
+    console.log("🎯 SMART: Will replace with:", `"${suggestion.suggestedText}"`)
+
+    // Build a mapping of text offsets to Slate positions
+    const offsetToPosition: Array<{ path: number[], offset: number }> = []
+    let textOffset = 0
+
+    // Walk through all text nodes to build offset mapping
+    for (const [node, path] of Node.nodes(editor)) {
+      if (Text.isText(node)) {
+        // Map each character position in this text node
+        for (let i = 0; i <= node.text.length; i++) {
+          offsetToPosition[textOffset + i] = { path, offset: i }
+        }
+        textOffset += node.text.length
+      } else if (path.length === 1 && textOffset > 0) {
+        // Only add newline offset if this is not the first paragraph
+        // and we have some text before this paragraph
+        const paragraphIndex = path[0]
+        if (paragraphIndex > 0) {
+          // Map the newline position to the start of this paragraph
+          offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
+          textOffset += 1
+        }
+      }
+    }
+
+    console.log("🎯 SMART: Built offset mapping, total text length:", textOffset)
+
+    // Get start and end positions
+    const startPos = offsetToPosition[suggestion.startOffset]
+    const endPos = offsetToPosition[suggestion.endOffset]
+
+    if (!startPos || !endPos) {
+      console.error("🎯 SMART: Could not find positions for offsets:", {
+        startOffset: suggestion.startOffset,
+        endOffset: suggestion.endOffset,
+        mappingLength: offsetToPosition.length,
+        textLength: fullText.length,
+        availableOffsets: Object.keys(offsetToPosition).slice(0, 10) // Show first 10 for debugging
+      })
+      return
+    }
+
+    console.log("🎯 SMART: Found positions:", {
+      startPos,
+      endPos,
+      actualTextToReplace: fullText.substring(suggestion.startOffset, suggestion.endOffset)
+    })
+
+    // Perform the replacement
+    try {
+      // Create the selection range
+      const range = {
+        anchor: startPos,
+        focus: endPos
+      }
+
+      console.log("🎯 SMART: Applying replacement with range:", range)
+
+      // Select the range and replace with suggested text
+      Transforms.select(editor, range)
+      Transforms.insertText(editor, suggestion.suggestedText)
+
+      console.log("🎯 SMART: Successfully replaced text - new content:", slateToText(editor.children))
+
+    } catch (error) {
+      console.error("🎯 SMART: Error during text replacement:", error)
+    }
+  }, [editor]) // CRITICAL: Only depend on editor, not value
+
+  // Create decorations for suggestions with cursor protection
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
     const ranges: Range[] = []
     
     if (!Text.isText(node) || !suggestions.length) {
+      return ranges
+    }
+
+    // Don't interfere with active selections to prevent cursor jumping
+    const hasActiveSelection = editor.selection && !Range.isCollapsed(editor.selection)
+    if (hasActiveSelection) {
       return ranges
     }
 
@@ -473,62 +658,106 @@ export const EditableContent = forwardRef<
       }
     }
 
-         suggestions.forEach((suggestion) => {
-       if (suggestion.startOffset == null || suggestion.endOffset == null) {
-         return
-       }
+    // Track stale suggestion IDs for cleanup (but don't cleanup during active typing)
+    const staleSuggestionIds: string[] = []
 
-       const suggestionStart = suggestion.startOffset
-       const suggestionEnd = suggestion.endOffset
-       
-       // SAFETY CHECK: Verify the suggestion offsets are still valid for current text
-       if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
-         console.log(`🎨 SLATE: Skipping suggestion ${suggestion.id} - invalid offsets for current text`, {
-           suggestionStart,
-           suggestionEnd,
-           textLength: fullText.length,
-           originalText: suggestion.originalText,
-           currentTextAtOffset: fullText.substring(suggestionStart, suggestionEnd)
-         })
-         return
-       }
+    suggestions.forEach((suggestion) => {
+      if (suggestion.startOffset == null || suggestion.endOffset == null) {
+        return
+      }
 
-       // Additional check: verify the text at the offset still matches what we expect
-       const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
-       if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
-         console.log(`🎨 SLATE: Skipping suggestion ${suggestion.id} - text mismatch`, {
-           expected: suggestion.originalText,
-           actual: currentTextAtOffset,
-           offsets: `${suggestionStart}-${suggestionEnd}`
-         })
-         return
-       }
-       
-       // Check if this suggestion overlaps with this text node
-       const nodeStart = textOffset
-       const nodeEnd = textOffset + nodeText.length
-       
-       if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
-         // Calculate the range within this text node
-         const rangeStart = Math.max(0, suggestionStart - nodeStart)
-         const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
-         
-         if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
-           
-           
-           ranges.push({
-             anchor: { path, offset: rangeStart },
-             focus: { path, offset: rangeEnd },
-             suggestion: true,
-             suggestionId: suggestion.id,
-             title: suggestion.explanation || 'Click for suggestion'
-           })
-         }
-       }
-     })
+      const suggestionStart = suggestion.startOffset
+      const suggestionEnd = suggestion.endOffset
+      
+      // ENHANCED SAFETY CHECK: Verify the suggestion offsets are still valid for current text
+      if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
+        staleSuggestionIds.push(suggestion.id)
+        return
+      }
+
+      // ENHANCED TEXT MISMATCH CHECK: verify the text at the offset still matches what we expect
+      const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
+      if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
+        staleSuggestionIds.push(suggestion.id)
+        return
+      }
+
+      // ADDITIONAL CHECK: Skip suggestions for incomplete words (common in spell checking)
+      if (suggestion.suggestionType === 'spelling' && suggestion.originalText) {
+        // Check if this appears to be a partial word by looking at surrounding characters
+        const beforeChar = suggestionStart > 0 ? fullText[suggestionStart - 1] : ' '
+        const afterChar = suggestionEnd < fullText.length ? fullText[suggestionEnd] : ' '
+        
+        // If the word appears to be incomplete (no spaces around it), skip it
+        const isIncompleteWord = /[a-zA-Z]/.test(beforeChar) || /[a-zA-Z]/.test(afterChar)
+        if (isIncompleteWord && suggestion.originalText.length < 3) {
+          staleSuggestionIds.push(suggestion.id)
+          return
+        }
+      }
+      
+      // Check if this suggestion overlaps with this text node
+      const nodeStart = textOffset
+      const nodeEnd = textOffset + nodeText.length
+      
+      if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
+        // Calculate the range within this text node
+        const rangeStart = Math.max(0, suggestionStart - nodeStart)
+        const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
+        
+        if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
+          ranges.push({
+            anchor: { path, offset: rangeStart },
+            focus: { path, offset: rangeEnd },
+            suggestion: true,
+            suggestionId: suggestion.id,
+            title: suggestion.explanation || 'Click for suggestion'
+          })
+        }
+      }
+    })
+
+    // Only cleanup stale suggestions if user is not actively typing (to prevent cursor disruption)
+    if (staleSuggestionIds.length > 0) {
+      const now = Date.now()
+      const timeSinceLastChange = now - lastSpellCheckTimeRef.current
+      
+      // Wait at least 2 seconds after last typing before cleaning up
+      if (timeSinceLastChange > 2000) {
+        setTimeout(() => {
+          cleanupStaleSuggestions(staleSuggestionIds)
+        }, 500) // Longer delay to avoid interfering with typing
+      }
+    }
 
     return ranges
-  }, [suggestions, value, editor])
+  }, [
+    // CRITICAL: Use stable suggestion dependency to prevent re-renders
+    suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
+    value, 
+    editor, 
+    lastSpellCheckTimeRef
+  ]) // Stable dependency based on suggestion IDs and offsets only
+
+  // Cleanup function for stale suggestions
+  const cleanupStaleSuggestions = useCallback(async (suggestionIds: string[]) => {
+    if (!documentIdRef.current || suggestionIds.length === 0) return
+    
+    try {
+      // Import the delete action and clean up stale suggestions
+      const { deleteSuggestionsByIdsAction } = await import("@/actions/db/suggestions-actions")
+      const result = await deleteSuggestionsByIdsAction(suggestionIds)
+      
+      if (result.isSuccess) {
+        // Refresh suggestions to update UI
+        if (onSuggestionsUpdated) {
+          onSuggestionsUpdated()
+        }
+      }
+    } catch (error) {
+      // Silent error handling
+    }
+  }, [documentIdRef, onSuggestionsUpdated])
 
   // Handle click events on suggestions
   const handleClick = useCallback((event: React.MouseEvent) => {
@@ -545,199 +774,37 @@ export const EditableContent = forwardRef<
     }
   }, [suggestions, onSuggestionClick])
 
-  // Handle keyboard events for formatting shortcuts and spell/grammar checking triggers
-  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
-    // Skip if accepting a suggestion
-    if (isAcceptingSuggestion) {
-      return
-    }
-
-    // Handle spacebar for spell checking
-    if (event.key === ' ' && documentId) {
-      // Trigger spell check after a very short delay to let the space be processed
-      setTimeout(() => {
-        const currentText = slateToText(value)
-        if (currentText.trim() && documentId) {
-          console.log("🔤 SLATE: Spacebar pressed, triggering instant spell check")
-          // Use the immediate spell check function (not the content change one)
-          debouncedSpellCheck(currentText, documentId)
-        }
-      }, 25) // Even faster spacebar response (25ms)
-    }
-
-    // Handle period for grammar checking
-    if (event.key === '.' && documentId) {
-      // Trigger grammar check after a short delay to let the period be processed
-      setTimeout(() => {
-        const currentText = slateToText(value)
-        if (currentText.trim() && documentId) {
-          console.log("🤖 SLATE: Period pressed, triggering immediate grammar check")
-          immediateGrammarCheck(currentText, documentId, 'period')
-        }
-      }, 100)
-    }
-
-    // Handle Enter/newline for grammar checking
-    if (event.key === 'Enter' && documentId) {
-      // Trigger grammar check after a short delay to let the newline be processed
-      setTimeout(() => {
-        const currentText = slateToText(value)
-        if (currentText.trim() && documentId) {
-          console.log("🤖 SLATE: Enter pressed, triggering immediate grammar check")
-          immediateGrammarCheck(currentText, documentId, 'newline')
-        }
-      }, 100)
-    }
-    
-    // Handle formatting shortcuts
-    if (!event.ctrlKey && !event.metaKey) {
-      return
-    }
-      
-    switch (event.key) {
-      case 'b':
-        event.preventDefault()
-        toggleFormat('bold')
-        break
-      case 'i':
-        event.preventDefault()
-        toggleFormat('italic')
-        break
-      case 'u':
-        event.preventDefault()
-        toggleFormat('underline')
-        break
-    }
-  }, [documentId, isAcceptingSuggestion, value, debouncedSpellCheck, immediateGrammarCheck])
-
-  // Accept suggestion by replacing text in the editor
-  const acceptSuggestion = useCallback((suggestion: Suggestion) => {
-    console.log("🎯 SLATE: acceptSuggestion called with:", {
-      id: suggestion.id,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset,
-      suggestedText: suggestion.suggestedText,
-      originalText: suggestion.originalText
-    })
-    
-    if (suggestion.startOffset == null || suggestion.endOffset == null || !suggestion.suggestedText) {
-      console.error("🎯 SLATE: Invalid suggestion data for acceptance:", suggestion)
-        return
-      }
-      
-    console.log("🎯 SLATE: Accepting suggestion:", {
-      id: suggestion.id,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset,
-      originalText: suggestion.originalText,
-      suggestedText: suggestion.suggestedText
-    })
-
-    // Convert the current editor value to text to verify positioning
-    const fullText = slateToText(value)
-    console.log("🎯 SLATE: Full text:", `"${fullText}"`)
-    console.log("🎯 SLATE: Text to replace:", `"${fullText.substring(suggestion.startOffset, suggestion.endOffset)}"`)
-    console.log("🎯 SLATE: Will replace with:", `"${suggestion.suggestedText}"`)
-
-    // Build a mapping of text offsets to Slate positions
-    const offsetToPosition: Array<{ path: number[], offset: number }> = []
-    let textOffset = 0
-
-    // Walk through all text nodes to build offset mapping
-    for (const [node, path] of Node.nodes(editor)) {
-      if (Text.isText(node)) {
-        // Map each character position in this text node
-        for (let i = 0; i <= node.text.length; i++) {
-          offsetToPosition[textOffset + i] = { path, offset: i }
-        }
-        textOffset += node.text.length
-      } else if (path.length === 1 && textOffset > 0) {
-        // Only add newline offset if this is not the first paragraph
-        // and we have some text before this paragraph
-        const paragraphIndex = path[0]
-        if (paragraphIndex > 0) {
-          // Map the newline position to the start of this paragraph
-          offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
-          textOffset += 1
-        }
-      }
-    }
-
-    console.log("🎯 SLATE: Built offset mapping, total text length:", textOffset)
-
-    // Get start and end positions
-    const startPos = offsetToPosition[suggestion.startOffset]
-    const endPos = offsetToPosition[suggestion.endOffset]
-
-    if (!startPos || !endPos) {
-      console.error("🎯 SLATE: Could not find positions for offsets:", {
-        startOffset: suggestion.startOffset,
-        endOffset: suggestion.endOffset,
-        mappingLength: offsetToPosition.length,
-        textLength: fullText.length,
-        availableOffsets: Object.keys(offsetToPosition).slice(0, 10) // Show first 10 for debugging
-      })
-      return
-    }
-
-    console.log("🎯 SLATE: Found positions:", {
-      startPos,
-      endPos,
-      actualTextToReplace: fullText.substring(suggestion.startOffset, suggestion.endOffset)
-    })
-
-    // Perform the replacement
-    try {
-      // Create the selection range
-      const range = {
-        anchor: startPos,
-        focus: endPos
-      }
-
-      console.log("🎯 SLATE: Applying replacement with range:", range)
-
-      // Select the range and replace with suggested text
-      Transforms.select(editor, range)
-      Transforms.insertText(editor, suggestion.suggestedText)
-
-      console.log("🎯 SLATE: Successfully replaced text - new content:", slateToText(editor.children))
-
-    } catch (error) {
-      console.error("🎯 SLATE: Error during text replacement:", error)
-    }
-  }, [editor, value])
-
-  // Expose methods via ref
+  // Expose methods via ref - STABILIZED TO PREVENT RECREATION
   useImperativeHandle(ref, () => {
-    console.log("🎯 SLATE: Creating ref interface with acceptSuggestion method")
-    const refInterface = {
+    // DON'T log on every creation to avoid noise
+    // console.log(`🎯 SMART: Creating ref interface on render #${renderCountRef.current}`)
+    
+    return {
       formatText: (command: string) => {
         ReactEditor.focus(editor)
         if (command === 'bold' || command === 'italic' || command === 'underline') {
-          toggleFormat(command)
+          const isActive = Editor.marks(editor)?.[command] === true
+          if (isActive) {
+            Editor.removeMark(editor, command)
+          } else {
+            Editor.addMark(editor, command, true)
+          }
         }
       },
       toggleBulletList: () => {
         ReactEditor.focus(editor)
-        // Implement bullet list toggle
         console.log("Toggle bullet list")
       },
       toggleNumberedList: () => {
         ReactEditor.focus(editor)
-        // Implement numbered list toggle
         console.log("Toggle numbered list")
       },
       focus: () => {
         ReactEditor.focus(editor)
       },
-      acceptSuggestion: (suggestion: Suggestion) => {
-        console.log("🎯 SLATE: acceptSuggestion called via ref with:", suggestion.id)
-        return acceptSuggestion(suggestion)
-      }
+      acceptSuggestion: acceptSuggestion
     }
-    console.log("🎯 SLATE: Returning ref interface:", Object.keys(refInterface))
-    return refInterface
-  }, [editor, acceptSuggestion])
+  }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES
 
   // Update format state when selection changes
   useEffect(() => {

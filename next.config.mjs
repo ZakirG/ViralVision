@@ -8,7 +8,7 @@ Configures Next.js for the app.
 const nextConfig = {
   images: {
     remotePatterns: [{ hostname: "localhost" }]
-  }
+  },
 }
 
 export default nextConfig

@@ -8,7 +8,7 @@ Database actions for suggestions in WordWise.
 
 import { db } from "@/db/db"
 import { suggestionsTable, type Suggestion, type NewSuggestion } from "@/db/schema"
-import { eq, and, desc } from "drizzle-orm"
+import { eq, and, desc, inArray } from "drizzle-orm"
 import type { ActionState } from "@/types/server-action-types"
 
 export async function createSuggestionAction(
@@ -271,6 +271,62 @@ export async function getSuggestionByIdAction(
     return {
       isSuccess: false,
       message: "Failed to get suggestion"
+    }
+  }
+}
+
+export async function deleteSuggestionsByIdsAction(
+  suggestionIds: string[]
+): Promise<ActionState<{ deletedCount: number }>> {
+  try {
+    if (suggestionIds.length === 0) {
+      return {
+        isSuccess: true,
+        message: "No suggestions to delete",
+        data: { deletedCount: 0 }
+      }
+    }
+
+    console.log("🧹 DELETE: Attempting to delete", suggestionIds.length, "stale suggestions by IDs:", suggestionIds.map(id => id.substring(0, 8)))
+    
+    // First check what suggestions actually exist with these IDs
+    const existingBeforeDelete = await db
+      .select()
+      .from(suggestionsTable)
+      .where(inArray(suggestionsTable.id, suggestionIds))
+    
+    console.log("🧹 DELETE: Found", existingBeforeDelete.length, "existing suggestions in database before delete:")
+    existingBeforeDelete.forEach(s => {
+      console.log(`  - ${s.id.substring(0, 8)}: "${s.originalText}" -> "${s.suggestedText}" (${s.startOffset}-${s.endOffset}) [${s.suggestionType}] dismissed=${s.dismissed} accepted=${s.accepted}`)
+    })
+    
+    // Delete all suggestions with the provided IDs
+    const result = await db
+      .delete(suggestionsTable)
+      .where(inArray(suggestionsTable.id, suggestionIds))
+      .returning({ id: suggestionsTable.id })
+
+    const deletedCount = result.length
+    console.log("🧹 DELETE: Actually deleted", deletedCount, "suggestions:", result.map(r => r.id.substring(0, 8)))
+    
+    // Verify they're gone
+    const existingAfterDelete = await db
+      .select()
+      .from(suggestionsTable)
+      .where(inArray(suggestionsTable.id, suggestionIds))
+    
+    console.log("🧹 DELETE: Remaining suggestions after delete:", existingAfterDelete.length)
+
+    return {
+      isSuccess: true,
+      message: `Deleted ${deletedCount} stale suggestions`,
+      data: { deletedCount }
+    }
+  } catch (error) {
+    console.error("🧹 DELETE: Error deleting suggestions by IDs:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to delete stale suggestions"
     }
   }
 } 

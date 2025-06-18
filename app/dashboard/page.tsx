@@ -75,9 +75,25 @@ export default function Dashboard() {
     }
   }
 
-  const handleDocumentCreated = (documentId: string) => {
-    router.push(`/editor?doc=${documentId}`)
-    loadDocuments() // Refresh the documents list
+  const handleDocumentCreated = async (documentId: string) => {
+    try {
+      console.log("🚀 Navigating to editor for document:", documentId)
+      
+      // Refresh the documents list before navigation to ensure it's up to date
+      // This ensures the new document appears in the list if the user navigates back
+      await loadDocuments()
+      
+      // Navigate to the editor
+      router.push(`/editor?doc=${documentId}`)
+      
+    } catch (error) {
+      console.error("❌ Error during post-creation navigation:", error)
+      toast({
+        title: "Document Created",
+        description: "Document was created successfully, but navigation failed. Please find it in your documents list.",
+        variant: "default"
+      })
+    }
   }
 
   const handleDeleteDocument = async (docId: string, e: React.MouseEvent) => {

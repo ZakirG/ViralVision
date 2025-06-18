@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -47,9 +47,58 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
   const [title, setTitle] = useState("")
   const [contentType, setContentType] = useState<string>("education")
   const [audienceLevel, setAudienceLevel] = useState<string>("general")
+  const [retryCount, setRetryCount] = useState(0)
+
+  // Retry logic for document creation
+  const createDocumentWithRetry = useCallback(async (documentData: any, maxRetries = 2): Promise<any> => {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`📝 Creating document (attempt ${attempt + 1}/${maxRetries + 1}):`, documentData)
+        const result = await createDocumentAction(documentData)
+        
+        if (result.isSuccess) {
+          console.log("✅ Document created successfully on attempt", attempt + 1)
+          return result
+        } else {
+          console.log(`❌ Document creation failed on attempt ${attempt + 1}:`, result.message)
+          
+          // If this is the last attempt, throw the error
+          if (attempt === maxRetries) {
+            return result
+          }
+          
+          // For retry-able errors, wait briefly before retrying
+          if (result.message?.includes("timeout") || result.message?.includes("connection")) {
+            console.log(`⏳ Retrying document creation in 1 second...`)
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          } else {
+            // For non-retryable errors, don't retry
+            return result
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Document creation error on attempt ${attempt + 1}:`, error)
+        
+        // If this is the last attempt, throw the error
+        if (attempt === maxRetries) {
+          throw error
+        }
+        
+        // Wait briefly before retrying
+        console.log(`⏳ Retrying document creation in 1 second...`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Prevent double submission
+    if (loading) {
+      console.log("🚫 Document creation already in progress, ignoring duplicate submission")
+      return
+    }
     
     if (!title.trim()) {
       toast({
@@ -62,45 +111,61 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
 
     try {
       setLoading(true)
-      const result = await createDocumentAction({
+      setRetryCount(0)
+      
+      const documentData = {
         title: title.trim(),
         rawText: "",
         contentType: contentType as "education" | "edutainment" | "storytime" | "ad",
         audienceLevel: audienceLevel as "general" | "knowledgeable" | "expert"
-      })
+      }
+      
+      const result = await createDocumentWithRetry(documentData)
 
       if (result.isSuccess && result.data) {
-        // Log analytics event
-        try {
-          await logDocumentCreatedAction(
-            result.data.id,
-            contentType,
-            audienceLevel
-          )
-        } catch (error) {
-          console.error("Failed to log document created event:", error)
-        }
-
+        console.log("✅ Document created successfully:", result.data.id)
+        
+        // Reset form state immediately after successful creation
+        setTitle("")
+        setContentType("education")
+        setAudienceLevel("general")
+        setRetryCount(0)
+        
+        // Show success message
         toast({
           title: "Success",
           description: "Document created successfully"
         })
+        
+        // Close modal before navigation to improve UX
         setOpen(false)
-        setTitle("")
-        setContentType("education")
-        setAudienceLevel("general")
+        
+        // Call the document created handler (which includes navigation)
         onDocumentCreated(result.data.id)
+        
+        // Log analytics event asynchronously without blocking the UI
+        // This happens after the user experience is complete
+        logDocumentCreatedAction(
+          result.data.id,
+          contentType,
+          audienceLevel
+        ).catch((error) => {
+          console.error("📊 Failed to log document created event (non-blocking):", error)
+        })
+        
       } else {
+        console.error("❌ Document creation failed after retries:", result.message)
         toast({
           title: "Error",
-          description: result.message,
+          description: result.message || "Failed to create document. Please try again.",
           variant: "destructive"
         })
       }
     } catch (error) {
+      console.error("❌ Document creation error after retries:", error)
       toast({
         title: "Error",
-        description: "Failed to create document",
+        description: "Failed to create document. Please try again.",
         variant: "destructive"
       })
     } finally {

@@ -20,6 +20,7 @@ export async function createDocumentAction(
     const { userId } = await auth()
     
     if (!userId) {
+      console.error("❌ Document creation failed: User not authenticated")
       return {
         isSuccess: false,
         message: "User not authenticated"
@@ -27,17 +28,37 @@ export async function createDocumentAction(
     }
 
     const userUuid = clerkUserIdToUuid(userId)
+    console.log("📝 Creating document for user:", userUuid, "with data:", document)
 
-    // Create document and initial version in a transaction
+    // Validate input data
+    if (!document.title || !document.title.trim()) {
+      console.error("❌ Document creation failed: Title is required")
+      return {
+        isSuccess: false,
+        message: "Document title is required"
+      }
+    }
+
+    // Create document and initial version in a transaction with timeout protection
     const result = await db.transaction(async (tx) => {
+      console.log("🔄 Starting database transaction for document creation")
+      
       // Create the document
       const [newDocument] = await tx
         .insert(documentsTable)
         .values({
           ...document,
-          userId: userUuid
+          userId: userUuid,
+          rawText: document.rawText || "", // Ensure rawText is never null
+          status: "draft" // Explicitly set status
         })
         .returning()
+
+      if (!newDocument) {
+        throw new Error("Failed to create document - no data returned")
+      }
+
+      console.log("✅ Document created with ID:", newDocument.id)
 
       // Create the initial document version (version 1)
       await tx
@@ -48,19 +69,36 @@ export async function createDocumentAction(
           textSnapshot: document.rawText || ""
         })
 
+      console.log("✅ Initial document version created for document:", newDocument.id)
+
       return newDocument
     })
 
+    console.log("✅ Document creation transaction completed successfully")
     return {
       isSuccess: true,
       message: "Document created successfully",
       data: result
     }
   } catch (error) {
-    console.error("Error creating document:", error)
+    console.error("❌ Error creating document:", error)
+    
+    // Provide more specific error messages based on the error type
+    let errorMessage = "Failed to create document"
+    
+    if (error instanceof Error) {
+      if (error.message.includes("timeout")) {
+        errorMessage = "Request timed out. Please try again."
+      } else if (error.message.includes("connection")) {
+        errorMessage = "Database connection issue. Please try again."
+      } else if (error.message.includes("constraint")) {
+        errorMessage = "Invalid data provided. Please check your input."
+      }
+    }
+
     return {
       isSuccess: false,
-      message: "Failed to create document"
+      message: errorMessage
     }
   }
 }

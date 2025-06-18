@@ -194,8 +194,9 @@ export default function EditorPage() {
               <p className="font-medium mb-1">Automatic Checking:</p>
               <ul className="space-y-1 text-xs">
                 <li>• Wait 1 second after typing → spell check</li>
-                <li>• Type a period (.) → grammar check</li>
+                <li>• Type a period (.) → spell + grammar check</li>
                 <li>• Real-time highlighting in editor</li>
+                <li>• Parallel processing for speed</li>
               </ul>
             </div>
             <div>

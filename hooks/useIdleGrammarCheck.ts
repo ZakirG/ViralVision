@@ -1,8 +1,8 @@
 /*
 <ai_context>
-Custom hook for efficient idle-based LLM grammar checking.
+Custom hook for efficient idle-based spell and grammar checking.
 Minimizes API calls through intelligent scheduling and request cancellation.
-Triggers after 1s idle or period, aborts on user typing.
+Triggers after 1s idle (spell) or period (spell + grammar), aborts on user typing.
 </ai_context>
 */
 
@@ -19,12 +19,12 @@ interface GrammarSuggestion {
   suggestionType: 'grammar'
 }
 
-interface UseIdleGrammarCheckOptions {
+interface UseIdleSpellGrammarCheckOptions {
   /** Current text content */
   text: string
   /** Whether editor is focused */
   isFocused: boolean
-  /** Callback when grammar suggestions are received */
+  /** Callback when spell/grammar suggestions are received */
   onSuggestions: (suggestions: GrammarSuggestion[]) => void
   /** IDs of dismissed suggestions to filter out */
   dismissedIds: string[]
@@ -32,12 +32,12 @@ interface UseIdleGrammarCheckOptions {
   idleTimeout?: number
 }
 
-interface UseIdleGrammarCheckReturn {
-  /** Trigger grammar check immediately (e.g., on period) */
+interface UseIdleSpellGrammarCheckReturn {
+  /** Trigger spell + grammar check immediately (e.g., on period) */
   triggerCheck: () => void
-  /** Cancel any pending grammar check */
+  /** Cancel any pending spell/grammar check */
   cancelCheck: () => void
-  /** Whether a grammar check is currently in progress */
+  /** Whether a spell/grammar check is currently in progress */
   isChecking: boolean
   /** Current revision number */
   revision: number
@@ -49,7 +49,7 @@ export function useIdleGrammarCheck({
   onSuggestions,
   dismissedIds,
   idleTimeout = 1000
-}: UseIdleGrammarCheckOptions): UseIdleGrammarCheckReturn {
+}: UseIdleSpellGrammarCheckOptions): UseIdleSpellGrammarCheckReturn {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isCheckingRef = useRef(false)
@@ -75,7 +75,7 @@ export function useIdleGrammarCheck({
     isCheckingRef.current = false
   }, [])
 
-  // Perform the actual grammar check
+  // Perform both spelling and grammar checks
   const performGrammarCheck = useCallback(async (checkText: string, revision: number) => {
     if (!checkText.trim() || isCheckingRef.current) {
       return
@@ -85,49 +85,83 @@ export function useIdleGrammarCheck({
       isCheckingRef.current = true
       revisionRef.current = revision
 
-      console.log(`⏱️ Starting LLM grammar check - revision ${revision}`)
+      console.log(`⏱️ Starting spell + grammar check - revision ${revision}`)
 
       // Create new abort controller for this request
       const controller = new AbortController()
       abortControllerRef.current = controller
 
-      const response = await fetch('/api/llmGrammar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: checkText,
-          dismissedIds,
-          revision
+      // Run both spelling and grammar checks in parallel
+      const [spellResponse, grammarResponse] = await Promise.all([
+        // Spell check using server action
+        fetch('/api/spellCheck', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: checkText,
+            dismissedIds,
+            revision
+          }),
+          signal: controller.signal
         }),
-        signal: controller.signal
-      })
+        // Grammar check using LLM API
+        fetch('/api/llmGrammar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: checkText,
+            dismissedIds,
+            revision
+          }),
+          signal: controller.signal
+        })
+      ])
 
       // Check if request was aborted
       if (controller.signal.aborted) {
-        console.log("🚫 Grammar check was cancelled")
+        console.log("🚫 Spell + grammar check was cancelled")
         return
       }
 
-      if (!response.ok) {
-        throw new Error(`Grammar check failed: ${response.status}`)
+      // Process results
+      let allSuggestions: any[] = []
+
+      // Process spell check results
+      if (spellResponse.ok) {
+        const spellResult = await spellResponse.json()
+        if (spellResult.suggestions) {
+          allSuggestions.push(...spellResult.suggestions)
+          console.log(`📝 Spell check found ${spellResult.suggestions.length} suggestions`)
+        }
+      } else {
+        console.warn("⚠️ Spell check failed:", spellResponse.status)
       }
 
-      const result = await response.json()
+      // Process grammar check results
+      if (grammarResponse.ok) {
+        const grammarResult = await grammarResponse.json()
+        if (grammarResult.suggestions) {
+          allSuggestions.push(...grammarResult.suggestions)
+          console.log(`📝 Grammar check found ${grammarResult.suggestions.length} suggestions`)
+        }
+      } else {
+        console.warn("⚠️ Grammar check failed:", grammarResponse.status)
+      }
       
       // Only apply results if this is still the current revision
       if (revisionRef.current === revision && !controller.signal.aborted) {
-        console.log(`✅ Grammar check complete - ${result.suggestions.length} suggestions`)
-        onSuggestions(result.suggestions)
+        console.log(`✅ Combined check complete - ${allSuggestions.length} total suggestions`)
+        onSuggestions(allSuggestions)
         lastCheckTimeRef.current = Date.now()
       } else {
-        console.log(`🕰️ Grammar check result discarded - revision mismatch or cancelled`)
+        console.log(`🕰️ Check result discarded - revision mismatch or cancelled`)
       }
 
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.log("🚫 Grammar check was aborted")
+        console.log("🚫 Spell + grammar check was aborted")
       } else {
-        console.error("🚨 Grammar check error:", error)
+        console.error("🚨 Spell + grammar check error:", error)
       }
     } finally {
       isCheckingRef.current = false

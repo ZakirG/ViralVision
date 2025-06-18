@@ -545,11 +545,11 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
 
   return (
     <div className="relative">
-      {/* Grammar check status indicator */}
+      {/* Spell + Grammar check status indicator */}
       {isChecking && (
         <div className="absolute top-2 right-2 z-10 flex items-center space-x-2 bg-blue-50 border border-blue-200 text-blue-700 px-2 py-1 rounded-md text-xs">
           <div className="animate-spin h-3 w-3 border border-blue-500 border-t-transparent rounded-full"></div>
-          <span>Checking grammar...</span>
+          <span>Checking spelling & grammar...</span>
         </div>
       )}
       

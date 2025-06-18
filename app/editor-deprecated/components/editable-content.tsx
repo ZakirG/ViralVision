@@ -16,9 +16,10 @@ import { checkSpellingOptimizedAction } from "@/actions/languagetool-actions-opt
 import { checkGrammarWithOpenAIAction } from "@/actions/openai-grammar-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
-import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms } from "slate"
+import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms, Operation } from "slate"
 import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
+import { updateSuggestionsAfterOperations } from "@/utils/pathAnchors"
 
 // Define custom types for Slate
 type CustomElement = {
@@ -195,8 +196,17 @@ export const EditableContent = forwardRef<
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
 
-  // Use suggestions from props instead of internal state
-  const suggestions = propSuggestions
+  // Use suggestions from props, filtered for validity after operations
+  const filteredSuggestionsRef = useRef<Suggestion[]>([])
+  
+  // Update filtered suggestions when props change or operations occur
+  useEffect(() => {
+    filteredSuggestionsRef.current = propSuggestions.filter(s => 
+      s.startOffset != null && s.endOffset != null && s.startOffset < s.endOffset
+    )
+  }, [propSuggestions])
+  
+  const suggestions = filteredSuggestionsRef.current
 
   // Add render counter and cursor tracking
   const renderCountRef = useRef(0)
@@ -426,6 +436,23 @@ export const EditableContent = forwardRef<
   const handleChange = useCallback((newValue: Descendant[]) => {
     // Preserve the current selection immediately
     const currentSelection = editor.selection
+    
+    // Track operations to update suggestion positions
+    const operations = editor.operations
+    if (operations.length > 0 && filteredSuggestionsRef.current.length > 0) {
+      // Update suggestions based on operations
+      const updatedSuggestions = updateSuggestionsAfterOperations(
+        operations,
+        filteredSuggestionsRef.current
+      )
+      
+      // Only update if suggestions actually changed to prevent unnecessary re-renders
+      if (updatedSuggestions.length !== filteredSuggestionsRef.current.length ||
+          updatedSuggestions.some((s, i) => s.id !== filteredSuggestionsRef.current[i]?.id)) {
+        filteredSuggestionsRef.current = updatedSuggestions
+        console.log(`📍 [PathAnchors] Updated suggestions after operations: ${operations.length} ops, ${updatedSuggestions.length} valid suggestions remain`)
+      }
+    }
     
     setValue(newValue)
     

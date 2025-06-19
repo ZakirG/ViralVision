@@ -81,7 +81,7 @@ export function ImportTikTokModal({
       const metadata = getTikTokMetadata(apiResponse);
 
       // Function to clean WebVTT transcript and format for editor insertion
-      function formatTikTokContent(metadata: any) {
+      async function formatTikTokContent(metadata: any): Promise<string> {
         if (!metadata.transcriptWebVTT) {
           return '';
         }
@@ -100,12 +100,49 @@ export function ImportTikTokModal({
             .map(line => line.trim())
             .filter(line => line !== '');
           
+          // Remove the first line (prefix string)
+          if (lines.length > 0) {
+            lines.shift();
+          }
+          
           // Join the cleaned lines
           return lines.join('\n');
         }
         
         const cleanedTranscript = cleanWebVTTTranscript(metadata.transcriptWebVTT);
-        return cleanedTranscript;
+        
+        if (!cleanedTranscript.trim()) {
+          return '';
+        }
+        
+        // Send to OpenAI for punctuation and capitalization cleanup
+        try {
+          const openAIResponse = await fetch('/api/cleanTranscript', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: cleanedTranscript
+            })
+          });
+          
+          if (!openAIResponse.ok) {
+            console.error('Clean transcript API request failed:', openAIResponse.status);
+            return cleanedTranscript; // Return original if API fails
+          }
+          
+          const result = await openAIResponse.json();
+          console.log('Clean transcript API response:', result);
+          
+          const cleanedText = result.cleanedText;
+          console.log('OpenAI cleaned transcript:', cleanedText);
+          
+          return cleanedText || cleanedTranscript;
+        } catch (error) {
+          console.error('Error calling clean transcript API:', error);
+          return cleanedTranscript; // Return original if error occurs
+        }
       }
 
       console.log("Transcript WebVTT:", metadata.transcriptWebVTT);
@@ -116,7 +153,7 @@ export function ImportTikTokModal({
       console.log("Number of Likes:", metadata.numberOfLikes);
       
       // Format the content for insertion into the editor
-      const formattedContent = formatTikTokContent(metadata);
+      const formattedContent = await formatTikTokContent(metadata);
       
       // Call the callback to insert content into editor
       if (onContentImport) {

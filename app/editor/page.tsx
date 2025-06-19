@@ -146,7 +146,6 @@ export default function GrammarlyEditor() {
       try {
         const dismissedArray = Array.from(appliedViralCritiques)
         localStorage.setItem(storageKey, JSON.stringify(dismissedArray))
-        console.log("🚀 VIRAL CRITIQUE: Saved dismissed critiques to localStorage:", dismissedArray)
       } catch (error) {
         console.error("🚀 VIRAL CRITIQUE: Error saving dismissed critiques to localStorage:", error)
       }
@@ -170,7 +169,6 @@ export default function GrammarlyEditor() {
           title: result.data.title || "Untitled Document",
           content: result.data.rawText || ""
         }
-        console.log("💾 SAVE: Document loaded, initialized lastSavedContent")
       } else {
         toast({
           title: "Error",
@@ -213,7 +211,6 @@ export default function GrammarlyEditor() {
 
     try {
       setSaving(true)
-      console.log("💾 SAVE: Updating document in database")
       const result = await updateDocumentAction(documentId, {
         title: documentTitle,
         rawText: documentContent
@@ -225,7 +222,6 @@ export default function GrammarlyEditor() {
           title: documentTitle,
           content: documentContent
         }
-        console.log("💾 SAVE: Document saved successfully, updated lastSavedContent")
       } else {
         console.error("Save failed:", result.message)
         // Only show toast if component is still mounted
@@ -265,17 +261,16 @@ export default function GrammarlyEditor() {
         const hasTitleChanged = documentTitle !== lastSaved.title
         
         if (hasContentChanged || hasTitleChanged) {
-          console.log("💾 SAVE: Content changed, triggering auto-save:", {
-            contentChanged: hasContentChanged,
-            titleChanged: hasTitleChanged,
-            oldContentLength: lastSaved.content.length,
-            newContentLength: documentContent.length,
-            oldTitle: lastSaved.title,
-            newTitle: documentTitle
-          })
           saveDocument()
+          toast({
+            title: "Saved",
+            description: "Document saved successfully"
+          })
         } else {
-          console.log("🚫 SAVE: Content unchanged, skipping auto-save (preventing unnecessary POST)")
+          toast({
+            title: "No Changes",
+            description: "Document is already up to date"
+          })
         }
       }
     }, 2000) // Auto-save after 2 seconds of inactivity
@@ -305,7 +300,6 @@ export default function GrammarlyEditor() {
         description: "Document saved successfully"
       })
     } else {
-      console.log("💾 SAVE: Manual save - no changes to save")
       toast({
         title: "No Changes",
         description: "Document is already up to date"
@@ -351,14 +345,8 @@ export default function GrammarlyEditor() {
 
   // Content handling functions
   const handleContentChange = useCallback((newContent: string) => {
-    console.log("📝 PARENT: handleContentChange called with content length:", newContent.length, "isViralCritiqueUpdating:", isViralCritiqueUpdating)
-    console.log("📝 PARENT: Current documentContent length:", documentContent.length)
-    console.log("📝 PARENT: Content changed:", newContent.length !== documentContent.length)
-    console.log("📝 PARENT: Stack trace:", new Error().stack?.split('\n').slice(1, 4).join('\n'))
-    
     // Always update the document content, even during viral critique updates
     // The editor is now updated directly, so we just need to sync the parent state
-    console.log("📝 PARENT: Updating document content")
     setDocumentContent(newContent)
   }, [documentContent])
 
@@ -376,16 +364,6 @@ export default function GrammarlyEditor() {
 
   // Suggestion handling functions
   const handleSuggestionClick = useCallback((suggestion: Suggestion) => {
-    console.log("🎯 PARENT: Suggestion clicked:", {
-      id: suggestion.id,
-      text: suggestion.suggestedText,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset,
-      isInCurrentList: realSuggestions.some(s => s.id === suggestion.id),
-      currentListCount: realSuggestions.length,
-      currentListIds: realSuggestions.map(s => s.id)
-    })
-    
     setSelectedSuggestionForPanel(suggestion)
     setSuggestionPanelOpen(true)
   }, [realSuggestions])
@@ -395,7 +373,6 @@ export default function GrammarlyEditor() {
     
     // Prevent refreshing while accepting a suggestion to avoid race conditions
     if (isAcceptingSuggestion) {
-      console.log("🔄 PARENT: Skipping refreshSuggestions - currently accepting a suggestion")
       return
     }
     
@@ -412,7 +389,6 @@ export default function GrammarlyEditor() {
     const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
     // Prevent concurrent suggestion acceptance
     if (isAcceptingSuggestion) {
-      console.log("⚡ PARENT: Already accepting a suggestion, ignoring this request")
       return
     }
 
@@ -425,11 +401,6 @@ export default function GrammarlyEditor() {
       return
     }
 
-    console.log("⚡ PARENT: INSTANT ACCEPT - Applying changes immediately:", {
-      suggestionId: suggestion.id,
-      suggestionText: suggestion.suggestedText
-    })
-
     // ⚡ INSTANT STEP 1: Apply text change in editor immediately
     if (!editorRef.current) {
       toast({
@@ -441,14 +412,11 @@ export default function GrammarlyEditor() {
     }
 
     try {
-      console.log("⚡ PARENT: Applying text change instantly in editor")
       editorRef.current.acceptSuggestion(suggestion)
       
       // ⚡ INSTANT STEP 2: Remove suggestion from UI immediately
-      console.log("⚡ PARENT: Removing suggestion from UI instantly")
       setRealSuggestions(prev => {
         const filtered = prev.filter(s => s.id !== suggestion.id)
-        console.log(`⚡ PARENT: Instantly removed suggestion from UI: ${prev.length} -> ${filtered.length}`)
         return filtered
       })
       
@@ -460,7 +428,6 @@ export default function GrammarlyEditor() {
       })
       
       // 🔄 BACKGROUND STEP 4: Do database operations asynchronously (non-blocking)
-      console.log("🔄 PARENT: Starting background database operations...")
       
       // Set a brief lock to prevent multiple rapid clicks
       setIsAcceptingSuggestion(true)
@@ -469,16 +436,12 @@ export default function GrammarlyEditor() {
       // Fire and forget - do all database operations in background
       const backgroundOperations = async () => {
         try {
-          console.log("🔄 BACKGROUND: Marking suggestion as accepted in database")
-          
           // Database operation 1: Mark as accepted
           const acceptResult = await acceptSuggestionAction(suggestion.id)
           
           if (!acceptResult.isSuccess) {
             // console.error("🔄 BACKGROUND: Database accept failed (non-critical):", acceptResult.message)
             // Don't show error to user since UI change already happened
-          } else {
-            console.log("🔄 BACKGROUND: Database accept successful")
           }
           
           // Database operation 2: Log analytics
@@ -488,13 +451,10 @@ export default function GrammarlyEditor() {
               suggestion.suggestionType || 'unknown',
               documentId
             )
-            console.log("🔄 BACKGROUND: Analytics logged")
           }
           
           // Database operation 3: Targeted recheck for grammar suggestions
           if (suggestion.suggestionType === 'grammar') {
-            console.log("🔄 BACKGROUND: Starting targeted recheck for grammar suggestion")
-            
             // Calculate the NEW offsets after the text replacement
             const originalStart = suggestion.startOffset || 0
             const originalEnd = suggestion.endOffset || 0
@@ -502,13 +462,6 @@ export default function GrammarlyEditor() {
             
             const newStart = originalStart
             const newEnd = originalStart + suggestedText.length
-            
-            console.log("🔄 BACKGROUND: Calculating recheck area:", {
-              originalRange: `${originalStart}-${originalEnd}`,
-              newRange: `${newStart}-${newEnd}`,
-              suggestedTextLength: suggestedText.length,
-              originalTextLength: originalEnd - originalStart
-            })
             
             if (documentId) {
               const recheckResult = await targetedRecheckAction(
@@ -519,7 +472,6 @@ export default function GrammarlyEditor() {
               )
               
               if (recheckResult.isSuccess) {
-                console.log("🔄 BACKGROUND: Targeted recheck completed successfully")
                 const totalNewSuggestions = recheckResult.data.spellingSuggestions.length + recheckResult.data.grammarSuggestions.length
                 
                 if (totalNewSuggestions > 0) {
@@ -540,7 +492,6 @@ export default function GrammarlyEditor() {
             }
           } else {
             // For spelling suggestions, just refresh to ensure consistency
-            console.log("🔄 BACKGROUND: Doing background refresh for spelling suggestion")
             setTimeout(() => refreshSuggestions(), 500)
           }
           
@@ -573,26 +524,14 @@ export default function GrammarlyEditor() {
   }, [documentId, refreshSuggestions, isAcceptingSuggestion, documentContent])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
-    console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {
-      id: suggestion.id,
-      text: suggestion.suggestedText,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset
-    })
-    
     try {
       // Mark suggestion as dismissed in database
-      console.log("🔍 DISMISSAL DEBUG: Calling dismissSuggestionAction for id:", suggestion.id, "with document content")
       const result = await dismissSuggestionAction(suggestion.id, documentContent)
       
-      console.log("🔍 DISMISSAL DEBUG: dismissSuggestionAction result:", result)
-      
       if (result.isSuccess) {
-        console.log("🔍 DISMISSAL DEBUG: Dismissal successful, removing from local state")
         // Remove the dismissed suggestion from the list immediately
         setRealSuggestions(prev => {
           const filtered = prev.filter(s => s.id !== suggestion.id)
-          console.log(`🎨 PARENT: Updated realSuggestions from ${prev.length} to ${filtered.length} suggestions`)
           return filtered
         })
         
@@ -610,7 +549,6 @@ export default function GrammarlyEditor() {
           description: "The suggestion has been permanently hidden and won't appear again."
         })
       } else {
-        console.log("🔍 DISMISSAL DEBUG: Dismissal failed:", result.message)
         toast({
           title: "Error",
           description: "Failed to dismiss suggestion. Please try again.",
@@ -635,7 +573,7 @@ export default function GrammarlyEditor() {
   // Protected suggestion update callback that respects the acceptance lock
   const handleSuggestionsUpdated = useCallback(() => {
     if (isAcceptingSuggestion) {
-      console.log("🔄 PARENT: Skipping onSuggestionsUpdated callback - currently accepting a suggestion")
+      // Skip refresh while accepting a suggestion
     } else {
       refreshSuggestions()
     }
@@ -643,43 +581,25 @@ export default function GrammarlyEditor() {
 
   // Viral critique update callback
   const handleViralCritiqueUpdate = useCallback((critique: ViralCritique | null, isLoading: boolean) => {
-    console.log("🚀 VIRAL CRITIQUE: Update callback called:", {
-      hasCritique: !!critique,
-      isLoading,
-      critiqueKeys: critique ? Object.keys(critique) : [],
-      dismissedKeys: Array.from(appliedViralCritiques)
-    })
-    
     setViralCritique(critique)
     setIsViralCritiqueLoading(isLoading)
   }, [appliedViralCritiques])
 
   const handleViralCritiqueApply = useCallback(async (critiqueKey: string, critiqueValue: string) => {
     if (applyingViralCritiqueKey || !documentContent.trim()) {
-      console.log("🚀 VIRAL CRITIQUE: Skipping apply - already applying or no content")
       return
     }
 
     try {
       setApplyingViralCritiqueKey(critiqueKey)
       setIsViralCritiqueUpdating(true)
-      console.log("🚀 VIRAL CRITIQUE: Starting application for key:", critiqueKey)
-      console.log("🚀 VIRAL CRITIQUE: Current document content length:", documentContent.length)
-      console.log("🚀 VIRAL CRITIQUE: Applying suggestion:", { key: critiqueKey, value: critiqueValue })
 
       // Call the rewrite action
       const result = await rewriteContentWithCritiqueAction(documentContent, critiqueValue)
 
       if (result.isSuccess && result.data) {
-        console.log("🚀 VIRAL CRITIQUE: OpenAI returned rewritten content:", {
-          originalLength: documentContent.length,
-          newLength: result.data.length,
-          newContent: result.data.substring(0, 200) + "..." // First 200 chars for debugging
-        })
-        
         // Replace the content in the editor using the editor's replaceContent method
         if (editorRef.current) {
-          console.log("🚀 VIRAL CRITIQUE: Calling editor.replaceContent()")
           editorRef.current.replaceContent(result.data)
         } else {
           console.error("🚀 VIRAL CRITIQUE: Editor ref is null!")
@@ -688,7 +608,6 @@ export default function GrammarlyEditor() {
         // Mark this viral critique as applied
         const contentHash = hashViralCritiqueContent(critiqueKey, critiqueValue)
         setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
-        console.log("🚀 VIRAL CRITIQUE: Marked as applied:", critiqueKey, "with hash:", contentHash)
         
         // Note: setDocumentContent will be called by the editor's onContentChange callback
         
@@ -711,8 +630,6 @@ export default function GrammarlyEditor() {
           description: `Applied ${critiqueKey.replace(/_/g, ' ')} suggestion`,
           duration: 3000
         })
-
-        console.log("🚀 VIRAL CRITIQUE: Successfully applied suggestion and updated content")
       } else {
         toast({
           title: "Error",
@@ -732,7 +649,6 @@ export default function GrammarlyEditor() {
       setApplyingViralCritiqueKey(null)
       // Delay clearing the update flag to prevent immediate reversion
       setTimeout(() => {
-        console.log("🚀 VIRAL CRITIQUE: Clearing update flag")
         setIsViralCritiqueUpdating(false)
       }, 1000)
     }
@@ -742,6 +658,14 @@ export default function GrammarlyEditor() {
     // Use the editor's insertContent method to append the content
     if (editorRef.current) {
       editorRef.current.insertContent(importedContent)
+      
+      // Trigger viral critique check after content import
+      // Add a delay to ensure the content has been fully inserted
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.triggerViralCritique()
+        }
+      }, 1000) // 1 second delay to ensure content is fully inserted
     }
   }, [])
 
@@ -932,7 +856,7 @@ export default function GrammarlyEditor() {
         {/* Editor content */}
         <div className="flex flex-1 overflow-hidden">
           {/* Text editor */}
-          <div className="flex-1 overflow-auto p-8">
+          <div className="flex-1 overflow-auto p-8" style={{ paddingBottom: "100px" }}>
             <div className="prose w-full max-w-none" spellCheck="false">
               <EditableContent
                 ref={editorRef}
@@ -1220,20 +1144,9 @@ export default function GrammarlyEditor() {
                         return !isDismissed
                       })
                       
-                      console.log("🎨 VIRAL CRITIQUE: Filtering suggestions:", {
-                        total: allEntries.length,
-                        dismissed: allEntries.filter(([key, value]) => {
-                          const contentHash = hashViralCritiqueContent(key, value)
-                          return appliedViralCritiques.has(contentHash)
-                        }).map(([key]) => key),
-                        showing: filteredEntries.map(([key]) => key),
-                        dismissedSet: Array.from(appliedViralCritiques)
-                      })
-                      
                       return filteredEntries.map(([key, value]) => {
                         const style = getCritiqueTypeStyle(key)
                         const contentHash = hashViralCritiqueContent(key, value)
-                        console.log("🎨 VIRAL CRITIQUE: Rendering suggestion:", key, "hash:", contentHash, "dismissed:", appliedViralCritiques.has(contentHash))
                         return (
                           <div key={key} className="border-b border-gray-100 last:border-b-0">
                             <div className="p-4 hover:bg-gray-50">
@@ -1265,7 +1178,6 @@ export default function GrammarlyEditor() {
                                       variant="outline"
                                       onClick={() => {
                                         const contentHash = hashViralCritiqueContent(key, value)
-                                        console.log(`Dismissing viral critique suggestion: ${key} with hash: ${contentHash}`)
                                         // Add the content hash to appliedViralCritiques to prevent this specific suggestion from appearing again
                                         setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
                                         toast({
@@ -1386,7 +1298,7 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Shorten script")}
+                      onClick={() => {}}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1398,7 +1310,7 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Write viral hook")}
+                      onClick={() => {}}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">Add a viral hook</span>
@@ -1408,7 +1320,7 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Rewrite conversational")}
+                      onClick={() => {}}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1420,7 +1332,7 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Add onscreen text")}
+                      onClick={() => {}}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1432,7 +1344,7 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Add delivery tips")}
+                      onClick={() => {}}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1477,7 +1389,6 @@ export default function GrammarlyEditor() {
                           e.preventDefault()
                           if (aiChatInput.trim()) {
                             // Handle send message here
-                            console.log("Send message:", aiChatInput)
                             setAiChatInput("")
                           }
                         }
@@ -1490,7 +1401,6 @@ export default function GrammarlyEditor() {
                       onClick={() => {
                         if (aiChatInput.trim()) {
                           // Handle send message here
-                          console.log("Send message:", aiChatInput)
                           setAiChatInput("")
                         }
                       }}

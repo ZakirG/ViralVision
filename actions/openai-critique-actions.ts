@@ -113,56 +113,96 @@ async function callOpenAICritique(text: string): Promise<ViralCritique | null> {
       // Remove any trailing commas before closing braces/brackets
       cleanedContent = cleanedContent.replace(/,(\s*[}\]])/g, '$1')
       
-      // Parse the JSON response
-      const critique = JSON.parse(cleanedContent) as ViralCritique
+      // Fix the specific issue with escaped quotes in JSON values
+      // The problem is that OpenAI sometimes returns \" inside JSON values
+      // We need to handle this by temporarily replacing and then restoring
       
-      // Validate that we have at least one critique field
-      const keys = Object.keys(critique)
-      if (keys.length === 0) {
-        console.error("🚀 OpenAI: Empty critique object:", critique)
-        return null
-      }
-      
-      // Filter out any non-string values and ensure all values are strings
-      const validCritique: ViralCritique = {}
-      for (const [key, value] of Object.entries(critique)) {
-        if (typeof value === 'string' && value.trim().length > 0) {
-          validCritique[key] = value.trim()
+      // First, let's try to parse as-is
+      try {
+        const critique = JSON.parse(cleanedContent) as ViralCritique
+        
+        // Validate that we have at least one critique field
+        const keys = Object.keys(critique)
+        if (keys.length === 0) {
+          console.error("🚀 OpenAI: Empty critique object:", critique)
+          return null
         }
+        
+        // Filter out any non-string values and ensure all values are strings
+        const validCritique: ViralCritique = {}
+        for (const [key, value] of Object.entries(critique)) {
+          if (typeof value === 'string' && value.trim().length > 0) {
+            validCritique[key] = value.trim()
+          }
+        }
+        
+        if (Object.keys(validCritique).length === 0) {
+          console.error("🚀 OpenAI: No valid critique fields found")
+          return null
+        }
+        
+        return validCritique
+      } catch (parseError) {
+        // If that fails, try to fix the escaped quotes issue
+        console.error("🚀 OpenAI: Initial JSON parse failed, attempting to fix escaped quotes")
+        
+        // Replace \" with a temporary marker
+        cleanedContent = cleanedContent.replace(/\\"/g, '___QUOTE___')
+        
+        // Now escape any remaining quotes that are inside JSON values
+        // This is a simpler approach: find all quotes and escape them if they're not at the start/end of values
+        let inString = false
+        let result = ''
+        let i = 0
+        
+        while (i < cleanedContent.length) {
+          const char = cleanedContent[i]
+          
+          if (char === '"' && (i === 0 || cleanedContent[i-1] !== '\\')) {
+            inString = !inString
+            result += char
+          } else if (char === '"' && inString) {
+            // This is a quote inside a string value, escape it
+            result += '\\"'
+          } else {
+            result += char
+          }
+          
+          i++
+        }
+        
+        // Restore the temporary markers
+        result = result.replace(/___QUOTE___/g, '"')
+        
+        // Try parsing again
+        const critique = JSON.parse(result) as ViralCritique
+        
+        // Validate that we have at least one critique field
+        const keys = Object.keys(critique)
+        if (keys.length === 0) {
+          console.error("🚀 OpenAI: Empty critique object after fixing quotes:", critique)
+          return null
+        }
+        
+        // Filter out any non-string values and ensure all values are strings
+        const validCritique: ViralCritique = {}
+        for (const [key, value] of Object.entries(critique)) {
+          if (typeof value === 'string' && value.trim().length > 0) {
+            validCritique[key] = value.trim()
+          }
+        }
+        
+        if (Object.keys(validCritique).length === 0) {
+          console.error("🚀 OpenAI: No valid critique fields found after fixing quotes")
+          return null
+        }
+        
+        return validCritique
       }
-      
-      if (Object.keys(validCritique).length === 0) {
-        console.error("🚀 OpenAI: No valid critique fields found")
-        return null
-      }
-      
-      return validCritique
     } catch (parseError) {
       console.error("🚀 OpenAI: Failed to parse JSON critique:", parseError)
       console.error("🚀 OpenAI: Raw content:", content)
       console.error("🚀 OpenAI: Content length:", content.length)
-      
-      // Try to find where the JSON might be valid
-      try {
-        // Look for JSON object boundaries
-        const startBrace = content.indexOf('{')
-        const endBrace = content.lastIndexOf('}')
-        
-        if (startBrace !== -1 && endBrace !== -1 && endBrace > startBrace) {
-          const jsonSubstring = content.substring(startBrace, endBrace + 1)
-          console.error("🚀 OpenAI: Attempting to parse JSON substring...")
-          const critique = JSON.parse(jsonSubstring) as ViralCritique
-          
-          // Validate and return if successful
-          const keys = Object.keys(critique)
-          if (keys.length > 0) {
-            console.error("🚀 OpenAI: Successfully parsed JSON substring")
-            return critique
-          }
-        }
-      } catch (fallbackError) {
-        console.error("🚀 OpenAI: Fallback parsing also failed:", fallbackError)
-      }
       
       return null
     }

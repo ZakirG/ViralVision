@@ -80,6 +80,7 @@ export interface EditableContentRef {
   acceptSuggestion: (suggestion: Suggestion) => void
   insertContent: (content: string) => void
   replaceContent: (content: string) => void
+  triggerViralCritique: () => void
 }
 
 // Custom leaf component for rendering suggestions
@@ -976,6 +977,16 @@ export const EditableContent = forwardRef<
             setIsReplacingContent(false)
           }
         }, 50) // Increased delay to ensure content update has propagated
+      },
+      triggerViralCritique: () => {
+        // Get the current text content from the editor
+        const currentText = slateToText(editor.children)
+        
+        // Trigger viral critique check if we have content and document ID
+        if (currentText.trim() && documentIdRef.current) {
+          console.log("🚀 VIRAL CRITIQUE: Manually triggering viral critique check")
+          debouncedViralCritiqueCheckRef.current?.(currentText)
+        }
       }
     }
   }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES

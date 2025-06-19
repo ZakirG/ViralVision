@@ -1211,7 +1211,7 @@ export default function GrammarlyEditor() {
                 )}
 
                 {/* Grammar & Spelling Suggestions */}
-                <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="flex-1 min-h-0 spelling-and-grammar-suggestions">
                   {suggestions.length === 0 ? (
                     <div className="flex items-center justify-center p-8">
                       <div className="text-center">

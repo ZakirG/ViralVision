@@ -154,7 +154,19 @@ async function callOpenAI(sentence: string): Promise<GrammarSuggestion[]> {
     }
 
     try {
-      const suggestions = JSON.parse(content.trim())
+      // Handle markdown-formatted JSON responses (with backticks)
+      let jsonContent = content.trim()
+      
+      // Remove markdown code block formatting if present
+      if (jsonContent.startsWith('```json')) {
+        jsonContent = jsonContent.replace(/^```json\s*/, '').replace(/\s*```$/, '')
+      } else if (jsonContent.startsWith('```')) {
+        jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '')
+      }
+      
+      console.log("🚀 OpenAI: Extracted JSON content:", jsonContent.substring(0, 100) + "...")
+      
+      const suggestions = JSON.parse(jsonContent)
       
       if (!Array.isArray(suggestions)) {
         console.warn("🚀 OpenAI: Response is not an array")
@@ -170,6 +182,7 @@ async function callOpenAI(sentence: string): Promise<GrammarSuggestion[]> {
       
     } catch (parseError) {
       console.error("🚀 OpenAI: Failed to parse JSON:", parseError)
+      console.error("🚀 OpenAI: Raw content:", content.substring(0, 200) + "...")
       return []
     }
   } catch (error) {

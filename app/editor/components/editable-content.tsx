@@ -211,6 +211,7 @@ export const EditableContent = forwardRef<
   const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
   const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
   const [isCheckingCritique, setIsCheckingCritique] = useState(false)
+  const [isViralCritiqueInProgress, setIsViralCritiqueInProgress] = useState(false)
   const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
   const [isReplacingContent, setIsReplacingContent] = useState(false)
 
@@ -264,11 +265,35 @@ export const EditableContent = forwardRef<
   const documentIdRef = useRef(documentId)
   const isAcceptingSuggestionRef = useRef(isAcceptingSuggestion)
   
+  // Add refs for the callback functions to prevent effect re-runs
+  const stableDebouncedWordCompleteSpellCheckRef = useRef<((text: string, docId: string) => void) | null>(null)
+  const sentenceCompleteGrammarCheckRef = useRef<((text: string, docId: string, trigger: string) => void) | null>(null)
+  const debouncedViralCritiqueCheckRef = useRef<((text: string) => void) | null>(null)
+  
+  // Track if initial checks have been run for the current document
+  const initialChecksRunRef = useRef<Set<string>>(new Set())
+  
+  // Track if cleanup is already in progress to prevent continuous calls
+  const cleanupInProgressRef = useRef<boolean>(false)
+  
+  // Track last cleanup time to prevent too frequent cleanups
+  const lastCleanupTimeRef = useRef<number>(0)
+  
+  // Track current viral critique text to prevent duplicate calls
+  const currentViralCritiqueTextRef = useRef<string>("")
+  
   // Update refs when props change, but don't trigger re-renders
   useEffect(() => {
     onContentChangeRef.current = onContentChange
     documentIdRef.current = documentId
     isAcceptingSuggestionRef.current = isAcceptingSuggestion
+  })
+
+  // Update callback function refs when they change
+  useEffect(() => {
+    stableDebouncedWordCompleteSpellCheckRef.current = stableDebouncedWordCompleteSpellCheck
+    sentenceCompleteGrammarCheckRef.current = sentenceCompleteGrammarCheck
+    debouncedViralCritiqueCheckRef.current = debouncedViralCritiqueCheck
   })
 
   // Handle initialContent changes (e.g., when suggestion is accepted) - STABLE VERSION
@@ -438,7 +463,7 @@ export const EditableContent = forwardRef<
     }
   }, [onSuggestionsUpdated, isGrammarCheckInProgress, editor])
 
-  // New: Debounced viral critique check
+  // New: Debounced viral critique check - now matches spell check timing
   const debouncedViralCritiqueCheck = useCallback(
     debounce(async (text: string) => {
       // Early return if no text content
@@ -447,10 +472,21 @@ export const EditableContent = forwardRef<
         return
       }
 
-      if (isCheckingCritique || !documentIdRef.current) return
+      if (isViralCritiqueInProgress || !documentIdRef.current) {
+        console.log("🚫 CRITIQUE: Skipping viral critique - already in progress or no document ID")
+        return
+      }
+
+      // Prevent duplicate calls for the same text
+      if (currentViralCritiqueTextRef.current === text) {
+        console.log("🚫 CRITIQUE: Skipping viral critique - same text already being processed")
+        return
+      }
 
       try {
+        setIsViralCritiqueInProgress(true)
         setIsCheckingCritique(true)
+        currentViralCritiqueTextRef.current = text
         onViralCritiqueUpdate?.(null, true) // Notify parent that we're loading
         
         const result = await critiqueViralAbilityAction(text)
@@ -469,9 +505,11 @@ export const EditableContent = forwardRef<
         onViralCritiqueUpdate?.(null, false) // Notify parent of error
       } finally {
         setIsCheckingCritique(false)
+        setIsViralCritiqueInProgress(false)
+        currentViralCritiqueTextRef.current = ""
       }
-    }, 2000), // 2-second debounce
-    [isCheckingCritique, onViralCritiqueUpdate]
+    }, WORD_COMPLETION_DELAY), // Use same delay as spell check (800ms)
+    [isViralCritiqueInProgress, onViralCritiqueUpdate]
   )
 
   // Detect if user just completed a word (typed space after letters)
@@ -598,6 +636,8 @@ export const EditableContent = forwardRef<
     
     if (isWordComplete && documentIdRef.current) {
       stableDebouncedWordCompleteSpellCheck(plainText, documentIdRef.current)
+      // Also trigger viral critique on word completion (same as spell check)
+      debouncedViralCritiqueCheck(plainText)
     }
     
     // Check for sentence completion (period, etc.)
@@ -609,7 +649,7 @@ export const EditableContent = forwardRef<
     
     if (isSentenceComplete && documentIdRef.current) {
       sentenceCompleteGrammarCheck(plainText, documentIdRef.current, 'sentence-end')
-      debouncedViralCritiqueCheck(plainText) // Trigger critique check
+      // Viral critique now runs on word completion, not sentence completion
     }
     
     // Always update previous text after checks
@@ -628,7 +668,7 @@ export const EditableContent = forwardRef<
          const currentText = slateToText(value)
          if (currentText.trim() && documentIdRef.current) {
            sentenceCompleteGrammarCheck(currentText, documentIdRef.current, 'enter')
-           debouncedViralCritiqueCheck(currentText) // Trigger critique check
+           // Viral critique now runs on word completion, not Enter key
          }
        }, 100)
      }
@@ -851,11 +891,16 @@ export const EditableContent = forwardRef<
       const now = Date.now()
       const timeSinceLastChange = now - lastSpellCheckTimeRef.current
       
-      // Wait at least 2 seconds after last typing before cleaning up
-      if (timeSinceLastChange > 2000) {
-        setTimeout(() => {
-          cleanupStaleSuggestions(staleSuggestionIds)
-        }, 500) // Longer delay to avoid interfering with typing
+      // Wait at least 5 seconds after last typing before cleaning up to prevent continuous calls
+      if (timeSinceLastChange > 5000) {
+        // Use a ref to track if cleanup is already in progress
+        if (!cleanupInProgressRef.current) {
+          cleanupInProgressRef.current = true
+          setTimeout(() => {
+            debouncedCleanupStaleSuggestions(staleSuggestionIds)
+            cleanupInProgressRef.current = false
+          }, 1000) // 1 second delay to avoid interfering with typing
+        }
       }
     }
 
@@ -864,29 +909,61 @@ export const EditableContent = forwardRef<
     // CRITICAL: Use stable suggestion dependency to prevent re-renders
     suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
     value, 
-    editor, 
-    lastSpellCheckTimeRef
-  ]) // Stable dependency based on suggestion IDs and offsets only
+    editor
+  ]) // Removed lastSpellCheckTimeRef from dependencies to prevent continuous re-runs
 
   // Cleanup function for stale suggestions
   const cleanupStaleSuggestions = useCallback(async (suggestionIds: string[]) => {
     if (!documentIdRef.current || suggestionIds.length === 0) return
     
+    // Additional protection: don't cleanup if we're already in progress
+    if (cleanupInProgressRef.current) {
+      console.log("🧹 CLEANUP: Skipping cleanup - already in progress")
+      return
+    }
+    
+    // Additional protection: don't cleanup if user is actively typing
+    const now = Date.now()
+    const timeSinceLastChange = now - lastSpellCheckTimeRef.current
+    if (timeSinceLastChange < 3000) {
+      console.log("🧹 CLEANUP: Skipping cleanup - user is actively typing")
+      return
+    }
+    
+    // Additional protection: don't cleanup too frequently (minimum 10 seconds between cleanups)
+    const timeSinceLastCleanup = now - lastCleanupTimeRef.current
+    if (timeSinceLastCleanup < 10000) {
+      console.log("🧹 CLEANUP: Skipping cleanup - too soon since last cleanup")
+      return
+    }
+    
     try {
+      console.log("🧹 CLEANUP: Starting cleanup for", suggestionIds.length, "suggestions")
+      lastCleanupTimeRef.current = now
+      
       // Import the delete action and clean up stale suggestions
       const { deleteSuggestionsByIdsAction } = await import("@/actions/db/suggestions-actions")
       const result = await deleteSuggestionsByIdsAction(suggestionIds)
       
       if (result.isSuccess) {
+        console.log("🧹 CLEANUP: Successfully cleaned up suggestions")
         // Refresh suggestions to update UI
         if (onSuggestionsUpdated) {
           onSuggestionsUpdated()
         }
       }
     } catch (error) {
-      // Silent error handling
+      console.error("🧹 CLEANUP: Error during cleanup:", error)
     }
-  }, [documentIdRef, onSuggestionsUpdated])
+  }, [documentIdRef, onSuggestionsUpdated, cleanupInProgressRef, lastSpellCheckTimeRef, lastCleanupTimeRef])
+
+  // Debounced version of cleanup to prevent excessive calls
+  const debouncedCleanupStaleSuggestions = useCallback(
+    debounce(async (suggestionIds: string[]) => {
+      await cleanupStaleSuggestions(suggestionIds)
+    }, 2000), // 2 second debounce
+    [cleanupStaleSuggestions]
+  )
 
   // Handle click events on suggestions
   const handleClick = useCallback((event: React.MouseEvent) => {
@@ -1025,9 +1102,18 @@ export const EditableContent = forwardRef<
       return
     }
 
+    // Check if we've already run initial checks for this document
+    if (initialChecksRunRef.current.has(documentId)) {
+      console.log("🚀 EDITOR: Initial checks already run for document:", documentId)
+      return
+    }
+
     console.log("🚀 EDITOR: ===== INITIAL LOAD CHECKS START =====")
     console.log("🚀 EDITOR: Running initial checks for document:", documentId)
     console.log("🚀 EDITOR: Content length:", initialContent.length)
+    
+    // Mark that we've run initial checks for this document
+    initialChecksRunRef.current.add(documentId)
     
     // Add a small delay to ensure editor is fully initialized
     const timer = setTimeout(() => {
@@ -1035,20 +1121,21 @@ export const EditableContent = forwardRef<
       
       if (plainText.trim()) {
         console.log("🚀 EDITOR: Running initial spell check")
-        stableDebouncedWordCompleteSpellCheck(plainText, documentId)
+        stableDebouncedWordCompleteSpellCheckRef.current?.(plainText, documentId)
         
         console.log("🚀 EDITOR: Running initial grammar check")
-        sentenceCompleteGrammarCheck(plainText, documentId, 'initial-load')
+        sentenceCompleteGrammarCheckRef.current?.(plainText, documentId, 'initial-load')
         
+        // Run viral critique at the same time as spell check (same timing)
         console.log("🚀 EDITOR: Running initial viral critique check")
-        debouncedViralCritiqueCheck(plainText)
+        debouncedViralCritiqueCheckRef.current?.(plainText)
       }
       
       console.log("🚀 EDITOR: ===== INITIAL LOAD CHECKS END =====")
     }, 500) // 500ms delay to ensure editor is ready
     
     return () => clearTimeout(timer)
-  }, [documentId, initialContent, stableDebouncedWordCompleteSpellCheck, sentenceCompleteGrammarCheck, debouncedViralCritiqueCheck])
+  }, [documentId, initialContent]) // Only depend on documentId and initialContent, not callback functions
 
   // Update format state when selection changes
   useEffect(() => {

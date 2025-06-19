@@ -31,9 +31,10 @@ Our Virality assistant has already critiqued this content. Below is their sugges
 
 Please rewrite the content to follow the guideline while:
 1. Maintaining the core message and intent
-2. Only make the most minimal changes necessary
-3. Follow the suggestion from the Virality assistant as CLOSELY as possible.
-4. Keep all other parts of the user's video script intact.
+2. Only making the most minimal changes necessary
+3. Preserving the paragraph breaks and newlines in the original content
+4. Following the suggestion from the Virality assistant as CLOSELY as possible.
+5. Keeping all other parts of the user's video script intact.
 
 Return only the rewritten content without any explanations or markdown formatting.`
 }
@@ -57,7 +58,7 @@ async function callOpenAIRewrite(originalContent: string, critiqueGuideline: str
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini-2025-04-14",
         messages: [
           {
             role: "user",

@@ -110,6 +110,49 @@ export default function GrammarlyEditor() {
 
   const documentId = searchParams.get("doc")
 
+  // Simple hash function for viral critique content
+  const hashViralCritiqueContent = useCallback((key: string, value: string): string => {
+    // Create a simple hash based on the key and the first 100 characters of the value
+    const content = `${key}:${value.substring(0, 100)}`
+    let hash = 0
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return `${key}-${Math.abs(hash).toString(36)}`
+  }, [])
+
+  // Load dismissed viral critiques from localStorage on mount
+  useEffect(() => {
+    if (documentId) {
+      const storageKey = `dismissed-viral-critiques-${documentId}`
+      try {
+        const stored = localStorage.getItem(storageKey)
+        if (stored) {
+          const dismissedCritiques = JSON.parse(stored)
+          setAppliedViralCritiques(new Set(dismissedCritiques))
+        }
+      } catch (error) {
+        console.error("🚀 VIRAL CRITIQUE: Error loading dismissed critiques from localStorage:", error)
+      }
+    }
+  }, [documentId])
+
+  // Save dismissed viral critiques to localStorage whenever they change
+  useEffect(() => {
+    if (documentId && appliedViralCritiques.size > 0) {
+      const storageKey = `dismissed-viral-critiques-${documentId}`
+      try {
+        const dismissedArray = Array.from(appliedViralCritiques)
+        localStorage.setItem(storageKey, JSON.stringify(dismissedArray))
+        console.log("🚀 VIRAL CRITIQUE: Saved dismissed critiques to localStorage:", dismissedArray)
+      } catch (error) {
+        console.error("🚀 VIRAL CRITIQUE: Error saving dismissed critiques to localStorage:", error)
+      }
+    }
+  }, [documentId, appliedViralCritiques])
+
   const loadDocument = useCallback(async () => {
     if (!documentId) return
 
@@ -600,9 +643,16 @@ export default function GrammarlyEditor() {
 
   // Viral critique update callback
   const handleViralCritiqueUpdate = useCallback((critique: ViralCritique | null, isLoading: boolean) => {
+    console.log("🚀 VIRAL CRITIQUE: Update callback called:", {
+      hasCritique: !!critique,
+      isLoading,
+      critiqueKeys: critique ? Object.keys(critique) : [],
+      dismissedKeys: Array.from(appliedViralCritiques)
+    })
+    
     setViralCritique(critique)
     setIsViralCritiqueLoading(isLoading)
-  }, [])
+  }, [appliedViralCritiques])
 
   const handleViralCritiqueApply = useCallback(async (critiqueKey: string, critiqueValue: string) => {
     if (applyingViralCritiqueKey || !documentContent.trim()) {
@@ -636,8 +686,9 @@ export default function GrammarlyEditor() {
         }
         
         // Mark this viral critique as applied
-        setAppliedViralCritiques(prev => new Set([...prev, critiqueKey]))
-        console.log("🚀 VIRAL CRITIQUE: Marked as applied:", critiqueKey)
+        const contentHash = hashViralCritiqueContent(critiqueKey, critiqueValue)
+        setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
+        console.log("🚀 VIRAL CRITIQUE: Marked as applied:", critiqueKey, "with hash:", contentHash)
         
         // Note: setDocumentContent will be called by the editor's onContentChange callback
         
@@ -1161,11 +1212,28 @@ export default function GrammarlyEditor() {
                 {/* Viral Critique Suggestions */}
                 {viralCritique && Object.keys(viralCritique).length > 0 && (
                   <div className="space-y-0 border-b border-gray-200">
-                    {Object.entries(viralCritique)
-                      .filter(([key, value]) => !appliedViralCritiques.has(key))
-                      .map(([key, value]) => {
+                    {(() => {
+                      const allEntries = Object.entries(viralCritique)
+                      const filteredEntries = allEntries.filter(([key, value]) => {
+                        const contentHash = hashViralCritiqueContent(key, value)
+                        const isDismissed = appliedViralCritiques.has(contentHash)
+                        return !isDismissed
+                      })
+                      
+                      console.log("🎨 VIRAL CRITIQUE: Filtering suggestions:", {
+                        total: allEntries.length,
+                        dismissed: allEntries.filter(([key, value]) => {
+                          const contentHash = hashViralCritiqueContent(key, value)
+                          return appliedViralCritiques.has(contentHash)
+                        }).map(([key]) => key),
+                        showing: filteredEntries.map(([key]) => key),
+                        dismissedSet: Array.from(appliedViralCritiques)
+                      })
+                      
+                      return filteredEntries.map(([key, value]) => {
                         const style = getCritiqueTypeStyle(key)
-                        console.log("🎨 VIRAL CRITIQUE: Rendering suggestion:", key, "applied:", appliedViralCritiques.has(key))
+                        const contentHash = hashViralCritiqueContent(key, value)
+                        console.log("🎨 VIRAL CRITIQUE: Rendering suggestion:", key, "hash:", contentHash, "dismissed:", appliedViralCritiques.has(contentHash))
                         return (
                           <div key={key} className="border-b border-gray-100 last:border-b-0">
                             <div className="p-4 hover:bg-gray-50">
@@ -1195,7 +1263,17 @@ export default function GrammarlyEditor() {
                                     <Button 
                                       size="sm" 
                                       variant="outline"
-                                      onClick={() => console.log(`Dismiss ${key} suggestion`)}
+                                      onClick={() => {
+                                        const contentHash = hashViralCritiqueContent(key, value)
+                                        console.log(`Dismissing viral critique suggestion: ${key} with hash: ${contentHash}`)
+                                        // Add the content hash to appliedViralCritiques to prevent this specific suggestion from appearing again
+                                        setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
+                                        toast({
+                                          title: "Suggestion Dismissed",
+                                          description: "This specific suggestion has been dismissed and won't appear again.",
+                                          duration: 3000
+                                        })
+                                      }}
                                       disabled={applyingViralCritiqueKey !== null}
                                     >
                                       Dismiss
@@ -1206,7 +1284,8 @@ export default function GrammarlyEditor() {
                             </div>
                           </div>
                         )
-                      })}
+                      })
+                    })()}
                   </div>
                 )}
 
@@ -1215,8 +1294,8 @@ export default function GrammarlyEditor() {
                   {suggestions.length === 0 ? (
                     <div className="flex items-center justify-center p-8">
                       <div className="text-center">
-                        <div className="mb-2 text-gray-500">No suggestions found</div>
-                        <div className="text-sm text-gray-400">Start typing to get grammar and spelling suggestions</div>
+                        <div className="mb-2 text-gray-500">No spelling or grammar suggestions found</div>
+                        <div className="text-sm text-gray-400">Start typing to get spelling and grammar suggestions</div>
                       </div>
                     </div>
                   ) : (

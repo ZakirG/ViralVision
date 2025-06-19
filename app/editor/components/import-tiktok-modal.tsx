@@ -129,7 +129,8 @@ export function ImportTikTokModal({
           
           if (!openAIResponse.ok) {
             console.error('Clean transcript API request failed:', openAIResponse.status);
-            return cleanedTranscript; // Return original if API fails
+            // Normalize multiple consecutive newlines to single newlines
+            return cleanedTranscript.replace(/\n{2,}/g, '\n');
           }
           
           const result = await openAIResponse.json();
@@ -138,10 +139,13 @@ export function ImportTikTokModal({
           const cleanedText = result.cleanedText;
           console.log('OpenAI cleaned transcript:', cleanedText);
           
-          return cleanedText || cleanedTranscript;
+          // Normalize multiple consecutive newlines to single newlines
+          const normalizedText = (cleanedText || cleanedTranscript).replace(/\n{2,}/g, '\n');
+          return normalizedText;
         } catch (error) {
           console.error('Error calling clean transcript API:', error);
-          return cleanedTranscript; // Return original if error occurs
+          // Normalize multiple consecutive newlines to single newlines
+          return cleanedTranscript.replace(/\n{2,}/g, '\n');
         }
       }
 

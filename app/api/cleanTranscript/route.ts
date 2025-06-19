@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
         messages: [
           {
             role: "user",
-            content: `Please rewrite the following transcript with correct punctuation and capitalization. Keep the same words and meaning, but fix grammar, punctuation, and capitalization to make it read naturally. Do not add any extra words or change the content - only fix punctuation and capitalization. Return only the corrected text, nothing else:\n\n${text}`
+            content: `Please rewrite the following transcript with correct punctuation and capitalization. Keep the same words and meaning, but fix grammar, punctuation, and capitalization to make it read naturally. Add line breaks between each sentence so that each sentence is on its own line. Do not add any extra words or change the content - only fix punctuation and capitalization. Return only the corrected text, nothing else:\n\n${text}`
           }
         ],
         temperature: 0.1,

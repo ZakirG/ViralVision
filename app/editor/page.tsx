@@ -1019,7 +1019,7 @@ export default function GrammarlyEditor() {
                   <div className="flex items-center justify-center gap-1">
                     <Sparkles className="size-3" />
                     <span className="text-center leading-tight">
-                      Smart Revise
+                      Quick Actions
                     </span>
                   </div>
                 </button>
@@ -1184,10 +1184,10 @@ export default function GrammarlyEditor() {
                 <div className="space-y-6">
                   <div className="text-center">
                     <h3 className="mb-2 font-medium text-gray-900">
-                      Smart Revise
+                      Quick Actions
                     </h3>
                     <p className="break-words text-sm text-gray-500">
-                      Revise your script with our smart actions to maximize
+                      Revise your script with AI to maximize
                       views, comments, shares, and virality.
                     </p>
                   </div>

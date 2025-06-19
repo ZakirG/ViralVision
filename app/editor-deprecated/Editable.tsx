@@ -14,6 +14,8 @@ import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { useSuggestStore } from "@/stores/useSuggestStore"
 import { useIdleGrammarCheck } from "@/hooks/useIdleGrammarCheck"
+import * as Popover from "@radix-ui/react-popover"
+import { Button } from "@/components/ui/button"
 
 // Custom types for Slate
 type CustomElement = {
@@ -78,29 +80,128 @@ interface EditableProps {
   // Add any additional props as needed
 }
 
-// A simplified Leaf component for highlighting only.
-// This is more stable as it's stateless and avoids causing re-renders.
+// Custom leaf component with suggestion highlighting and popover
 const SuggestionLeaf = ({ attributes, children, leaf }: any) => {
-  // Apply text formatting first
+  const [popoverOpen, setPopoverOpen] = useState(false)
+  const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 })
+  const { getSuggestionById, dismiss } = useSuggestStore()
+  
+  const handleClick = useCallback((event: React.MouseEvent) => {
+    if (leaf.suggestionId) {
+      event.preventDefault()
+      event.stopPropagation()
+      
+      // Get the position of the clicked element
+      const rect = (event.target as HTMLElement).getBoundingClientRect()
+      setPopoverPosition({ x: rect.left, y: rect.bottom + 8 })
+      setPopoverOpen(true)
+    }
+  }, [leaf.suggestionId])
+
+  const handleAccept = useCallback((replacement: string) => {
+    if (leaf.suggestionId) {
+      // This will be handled by the parent component
+      const customEvent = new CustomEvent('acceptSuggestion', {
+        detail: { id: leaf.suggestionId, replacement }
+      })
+      document.dispatchEvent(customEvent)
+      setPopoverOpen(false)
+    }
+  }, [leaf.suggestionId])
+
+  const handleDismiss = useCallback(() => {
+    if (leaf.suggestionId) {
+      dismiss(leaf.suggestionId)
+      setPopoverOpen(false)
+    }
+  }, [leaf.suggestionId, dismiss])
+
+  // Apply text formatting
   let styledChildren = children
   if (leaf.bold) styledChildren = <strong>{styledChildren}</strong>
   if (leaf.italic) styledChildren = <em>{styledChildren}</em>
   if (leaf.underline) styledChildren = <u>{styledChildren}</u>
 
-  // If it's a suggestion, wrap it in a styled span for highlighting
-  if (leaf.suggestion) {
+  // If this is a suggestion, wrap with interactive styling and popover
+  if (leaf.suggestion && leaf.suggestionId) {
+    const suggestion = getSuggestionById(leaf.suggestionId)
+    
     return (
-      <span
-        {...attributes}
-        className="bg-red-100" // Simple highlight class
-        data-suggestion-id={leaf.suggestionId}
-      >
-        {styledChildren}
-      </span>
+      <Popover.Root open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <Popover.Trigger asChild>
+          <span
+            {...attributes}
+            className="cursor-pointer bg-red-100 hover:bg-red-200 transition-colors rounded-sm px-1 py-0.5"
+            onClick={handleClick}
+            title={suggestion?.explanation || 'Click for suggestion'}
+          >
+            {styledChildren}
+          </span>
+        </Popover.Trigger>
+        
+        <Popover.Portal>
+          <Popover.Content
+            className="bg-white border border-gray-200 rounded-lg shadow-lg p-4 w-80 z-50"
+            style={{
+              position: 'fixed',
+              left: popoverPosition.x,
+              top: popoverPosition.y,
+            }}
+            sideOffset={5}
+          >
+            {suggestion && (
+              <div className="space-y-3">
+                <div className="border-b pb-2">
+                  <h4 className="font-semibold text-sm text-gray-900">
+                    {suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar'} Suggestion
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">{suggestion.explanation}</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="text-sm">
+                    <span className="text-gray-600">Original: </span>
+                    <span className="bg-red-100 px-1 rounded">{suggestion.originalText}</span>
+                  </div>
+                  
+                  {suggestion.suggestedText && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-gray-600">Suggestions:</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full justify-start text-sm"
+                        onClick={() => handleAccept(suggestion.suggestedText!)}
+                      >
+                        <span className="bg-green-100 px-2 py-1 rounded mr-2">
+                          {suggestion.suggestedText}
+                        </span>
+                        Replace
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex gap-2 pt-2 border-t">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDismiss}
+                    className="flex-1"
+                  >
+                    Ignore
+                  </Button>
+                </div>
+              </div>
+            )}
+            
+            <Popover.Arrow className="fill-white" />
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     )
   }
 
-  // Otherwise, just render the formatted text
   return <span {...attributes}>{styledChildren}</span>
 }
 
@@ -112,65 +213,11 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
   const isTypingRef = useRef(false)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const currentTypingLineRef = useRef<number | null>(null)
-  
-  // Add cursor preservation mechanisms from editable-content.tsx
-  const preservedSelectionRef = useRef<Range | null>(null)
-  const lastCursorPositionRef = useRef<Range | null>(null)
-  const renderCountRef = useRef(0)
+  const [decorationTrigger, setDecorationTrigger] = useState(0)
   
   const { getAllSuggestions, dismiss, addSuggestions, getDismissedIds } = useSuggestStore()
   const suggestions = getAllSuggestions()
   
-  // Track render count for debugging
-  renderCountRef.current += 1
-  
-  // Track cursor position changes and automatically correct unexpected jumps
-  useEffect(() => {
-    const currentSelection = editor.selection
-    const lastSelection = lastCursorPositionRef.current
-    
-    if (currentSelection !== lastSelection) {
-      console.log("🎯 CURSOR: Selection changed", {
-        from: lastSelection ? `${lastSelection.anchor.path}:${lastSelection.anchor.offset}` : 'null',
-        to: currentSelection ? `${currentSelection.anchor.path}:${currentSelection.anchor.offset}` : 'null',
-        render: renderCountRef.current,
-        isCollapsed: currentSelection ? Range.isCollapsed(currentSelection) : false
-      })
-      
-      // Detect and correct cursor jumps (to beginning of document or beginning of line)
-      if (currentSelection && lastSelection && 
-          currentSelection.anchor.offset === 0 && lastSelection.anchor.offset > 5) {
-        console.log("🚨 CURSOR: Jump detected! Attempting restoration", {
-          from: `${lastSelection.anchor.path}:${lastSelection.anchor.offset}`,
-          to: `${currentSelection.anchor.path}:${currentSelection.anchor.offset}`
-        })
-        
-        // Restore the previous cursor position
-        setTimeout(() => {
-          const currentSelectionInTimeout = editor.selection
-          console.log("🔧 CURSOR: Restoration timeout executing", {
-            currentInTimeout: currentSelectionInTimeout ? `${currentSelectionInTimeout.anchor.path}:${currentSelectionInTimeout.anchor.offset}` : 'null',
-            willRestore: lastSelection ? `${lastSelection.anchor.path}:${lastSelection.anchor.offset}` : 'null'
-          })
-          
-          try {
-            if (lastSelection && editor.selection && 
-                editor.selection.anchor.offset === 0 && lastSelection.anchor.offset > 5) {
-              console.log("✅ CURSOR: Executing Transforms.select", lastSelection)
-              Transforms.select(editor, lastSelection)
-              console.log("✅ CURSOR: Restoration completed, new selection:", editor.selection)
-            } else {
-              console.log("❌ CURSOR: Restoration skipped - conditions not met")
-            }
-          } catch (error) {
-            console.log("❌ CURSOR: Restoration failed", error)
-          }
-        }, 10)
-      }
-      lastCursorPositionRef.current = currentSelection
-    }
-  })
-
   // Get current text for idle grammar checking
   const currentText = useMemo(() => slateToText(value), [value])
   
@@ -296,7 +343,140 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     }
   }, [])
 
-  // Improved decorate function with cursor protection and stable dependencies
+  // Handle accepting suggestions with collision protection and dynamic positioning
+  const handleAcceptSuggestion = useCallback((id: string, replacement?: string) => {
+    if (isAcceptingSuggestionRef.current) {
+      console.log("🔒 Suggestion acceptance in progress, ignoring concurrent request")
+      return
+    }
+
+    const suggestion = suggestions.find(s => s.id === id)
+    console.log("🔍 Debug suggestion lookup:", { 
+      id, 
+      replacement, 
+      suggestion: suggestion ? {
+        id: suggestion.id,
+        originalText: suggestion.originalText,
+        suggestedText: suggestion.suggestedText,
+        startOffset: suggestion.startOffset,
+        endOffset: suggestion.endOffset
+      } : null,
+      allSuggestionsCount: suggestions.length,
+      allSuggestionIds: suggestions.map(s => s.id)
+    })
+
+    if (!suggestion) {
+      console.error("❌ Suggestion not found with ID:", id)
+      return
+    }
+
+    if (!replacement) {
+      console.error("❌ No replacement text provided")
+      return
+    }
+
+    if (!suggestion.originalText) {
+      console.error("❌ Suggestion missing originalText:", suggestion)
+      return
+    }
+
+    console.log("🎯 Accepting suggestion:", { id, replacement, originalText: suggestion.originalText })
+
+    try {
+      isAcceptingSuggestionRef.current = true
+
+      // Get current editor content
+      const fullText = slateToText(editor.children)
+      console.log("🎯 Current full text:", `"${fullText}"`)
+      
+      // Dynamically find the current position of the target text
+      const position = findTextPosition(suggestion.originalText, fullText)
+      if (!position) {
+        console.error("❌ Could not find target text in current document:", suggestion.originalText)
+        return
+      }
+
+      console.log("🎯 Found target text at positions:", position.start, "-", position.end)
+      console.log("🎯 Target text found:", `"${fullText.substring(position.start, position.end)}"`)
+      console.log("🎯 Context around target:", `"${fullText.substring(Math.max(0, position.start - 10), position.end + 10)}"`)
+      
+      // Build offset-to-position mapping using current text length
+      const offsetToPosition: Array<{ path: number[], offset: number }> = []
+      let textOffset = 0
+
+      for (const [node, path] of Node.nodes(editor)) {
+        if (Text.isText(node)) {
+          for (let i = 0; i <= node.text.length; i++) {
+            offsetToPosition[textOffset + i] = { path, offset: i }
+          }
+          textOffset += node.text.length
+        } else if (path.length === 1 && textOffset > 0) {
+          const paragraphIndex = path[0]
+          if (paragraphIndex > 0) {
+            offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
+            textOffset += 1
+          }
+        }
+      }
+
+      const startPos = offsetToPosition[position.start]
+      const endPos = offsetToPosition[position.end]
+
+      if (!startPos || !endPos) {
+        console.error("❌ Could not map positions to Slate coordinates:", {
+          startOffset: position.start,
+          endOffset: position.end,
+          textLength: fullText.length,
+          offsetMappingLength: offsetToPosition.length
+        })
+        return
+      }
+
+      // Perform the replacement using Slate transforms
+      const range = { anchor: startPos, focus: endPos }
+      console.log("🎯 Slate range to replace:", range)
+      Transforms.select(editor, range)
+      Transforms.insertText(editor, replacement)
+
+      // Check the result
+      const newFullText = slateToText(editor.children)
+      console.log("🎯 Text after replacement:", `"${newFullText}"`)
+
+      // Dismiss the suggestion from the store
+      dismiss(id)
+
+      console.log("✅ Successfully accepted suggestion and dismissed from store")
+
+    } catch (error) {
+      console.error("❌ Error accepting suggestion:", error)
+    } finally {
+      isAcceptingSuggestionRef.current = false
+    }
+  }, [suggestions, editor, dismiss, findTextPosition])
+
+  // Listen for custom accept suggestion events
+  useEffect(() => {
+    const handleAcceptEvent = (event: any) => {
+      const { id, replacement } = event.detail
+      handleAcceptSuggestion(id, replacement)
+    }
+
+    document.addEventListener('acceptSuggestion', handleAcceptEvent)
+    return () => document.removeEventListener('acceptSuggestion', handleAcceptEvent)
+  }, [handleAcceptSuggestion])
+
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+      isTypingRef.current = false
+      currentTypingLineRef.current = null
+    }
+  }, [])
+
+  // Decorate function to add suggestion ranges
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
     const ranges: Range[] = []
     
@@ -304,28 +484,24 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
       return ranges
     }
 
-    console.log("🎨 DECORATE: Called for node", {
-      path,
-      nodeText: node.text.substring(0, 20) + (node.text.length > 20 ? '...' : ''),
-      suggestionsCount: suggestions.length,
-      currentSelection: editor.selection ? `${editor.selection.anchor.path}:${editor.selection.anchor.offset}` : 'null'
-    })
-
-    // Don't interfere with active selections to prevent cursor jumping
-    const hasActiveSelection = editor.selection && !Range.isCollapsed(editor.selection)
-    if (hasActiveSelection) {
-      console.log("🎨 DECORATE: Skipping - active selection detected")
+    // Don't interfere with active selections during suggestion acceptance
+    if (isAcceptingSuggestionRef.current) {
       return ranges
     }
 
-    // Don't interfere during suggestion acceptance
-    if (isAcceptingSuggestionRef.current) {
-      console.log("🎨 DECORATE: Skipping - suggestion acceptance in progress")
-      return ranges
+    // Only hide decorations on the current line being typed, preserve others
+    if (isTypingRef.current && currentTypingLineRef.current !== null) {
+      // Check if this node is on the current line being typed
+      const nodeParagraphIndex = path[0]
+      if (nodeParagraphIndex === currentTypingLineRef.current) {
+        // Hide decorations only on the current line being typed
+        return ranges
+      }
+      // Continue showing decorations on other lines
     }
 
     const nodeText = node.text
-    const fullText = slateToText(editor.children)
+    const fullText = slateToText(value)
     
     // Find the start offset of this text node in the full document
     let textOffset = 0
@@ -354,14 +530,8 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
       const suggestionStart = suggestion.startOffset
       const suggestionEnd = suggestion.endOffset
       
-      // Validate suggestion offsets against current text
+      // Validate suggestion offsets
       if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
-        return
-      }
-
-      // Additional safety check: verify the text at offset still matches expected
-      const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
-      if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
         return
       }
 
@@ -374,77 +544,27 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
         const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
         
         if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
-          const decorationRange = {
+          ranges.push({
             anchor: { path, offset: rangeStart },
             focus: { path, offset: rangeEnd },
             suggestion: true,
             suggestionId: suggestion.id,
             title: suggestion.explanation || 'Click for suggestion'
-          }
-          ranges.push(decorationRange)
-          console.log("🎨 DECORATE: Added range", {
-            suggestionId: suggestion.id,
-            range: `${decorationRange.anchor.path}:${decorationRange.anchor.offset}-${decorationRange.focus.offset}`,
-            text: nodeText.substring(rangeStart, rangeEnd)
           })
         }
       }
     })
 
-    console.log("🎨 DECORATE: Returning", ranges.length, "ranges for path", path)
     return ranges
-  }, [
-    // STABLE: Use stable dependency based on suggestion IDs and offsets only to prevent re-renders
-    suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
-    editor
-  ])
+  }, [suggestions, value, editor, decorationTrigger])
 
   const handleChange = (newValue: Descendant[]) => {
-    console.log("🔄 CHANGE: handleChange called", {
-      render: renderCountRef.current,
-      operations: editor.operations.map(op => op.type),
-      currentSelection: editor.selection ? `${editor.selection.anchor.path}:${editor.selection.anchor.offset}` : 'null'
-    })
-    
     // Skip updates during suggestion acceptance to prevent conflicts
     if (isAcceptingSuggestionRef.current) {
-      console.log("🔒 CHANGE: Skipping - suggestion acceptance in progress")
       return
     }
 
-    // Preserve the current selection before any changes
-    const currentSelection = editor.selection
-    if (currentSelection) {
-      preservedSelectionRef.current = currentSelection
-      console.log("💾 CHANGE: Preserved selection", `${currentSelection.anchor.path}:${currentSelection.anchor.offset}`)
-    }
-
     setValue(newValue)
-    console.log("📝 CHANGE: setValue completed")
-    
-    // Restore selection if it was lost or jumped unexpectedly
-    setTimeout(() => {
-      const selectionAfterChange = editor.selection
-      console.log("🔧 CHANGE: Restoration timeout executing", {
-        preserved: preservedSelectionRef.current ? `${preservedSelectionRef.current.anchor.path}:${preservedSelectionRef.current.anchor.offset}` : 'null',
-        current: selectionAfterChange ? `${selectionAfterChange.anchor.path}:${selectionAfterChange.anchor.offset}` : 'null'
-      })
-      
-      if (preservedSelectionRef.current && 
-          (!editor.selection || 
-           (editor.selection.anchor.offset === 0 && preservedSelectionRef.current.anchor.offset > 5))) {
-        console.log("🔧 CHANGE: Attempting selection restoration")
-        try {
-          Transforms.select(editor, preservedSelectionRef.current)
-          console.log("✅ CHANGE: Selection restored successfully", editor.selection)
-        } catch (error) {
-          console.log("❌ CHANGE: Selection restoration failed", error)
-        }
-      } else {
-        console.log("⏭️ CHANGE: No restoration needed")
-      }
-      preservedSelectionRef.current = null
-    }, 10)
 
     // Detect typing to prevent decoration interference
     const hasTextOperations = editor.operations.some(op => 
@@ -458,7 +578,9 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
       const { selection } = editor
       if (selection && Range.isCollapsed(selection)) {
         const [, currentPath] = Editor.node(editor, selection.anchor.path)
+        // Get the paragraph index (first element of path)
         currentTypingLineRef.current = currentPath[0] || 0
+        console.log("📝 Currently typing on line:", currentTypingLineRef.current)
       }
       
       // Clear any existing timeout
@@ -471,24 +593,11 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
         isTypingRef.current = false
         currentTypingLineRef.current = null
         
-        // Instead of triggering state change that could affect cursor,
-        // just let the next natural re-render handle decoration updates
-        console.log("📍 Typing state cleared, decorations will re-enable on next render")
-        
-        // Restore cursor position if it was lost
-        if (preservedSelectionRef.current && !editor.selection) {
-          setTimeout(() => {
-            try {
-              if (preservedSelectionRef.current) {
-                Transforms.select(editor, preservedSelectionRef.current)
-                preservedSelectionRef.current = null
-              }
-            } catch (error) {
-              // Silent fallback
-            }
-          }, 10)
-        }
-      }, 500)
+        // Trigger re-render through React state instead of Slate manipulation
+        // This preserves cursor position while updating decorations
+        setDecorationTrigger(prev => prev + 1)
+        console.log("📍 Decorations re-enabled, cursor position preserved")
+      }, 500) // 500ms delay after stopping typing
     }
 
     // Log operations for debugging
@@ -496,121 +605,6 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
       console.log("📝 Slate operations:", editor.operations.map(op => op.type))
     }
   }
-
-  // Improved accept suggestion with better cursor preservation
-  const handleAcceptSuggestion = useCallback((id: string, replacement?: string) => {
-    if (isAcceptingSuggestionRef.current) {
-      console.log("🔒 Suggestion acceptance in progress, ignoring concurrent request")
-      return
-    }
-
-    const suggestion = suggestions.find(s => s.id === id)
-    console.log("🔍 Debug suggestion lookup:", { 
-      id, 
-      replacement, 
-      suggestion: suggestion ? {
-        id: suggestion.id,
-        originalText: suggestion.originalText,
-        suggestedText: suggestion.suggestedText,
-        startOffset: suggestion.startOffset,
-        endOffset: suggestion.endOffset
-      } : null,
-      allSuggestionsCount: suggestions.length,
-      allSuggestionIds: suggestions.map(s => s.id)
-    })
-
-    if (!suggestion || !replacement || !suggestion.originalText) {
-      console.error("❌ Invalid suggestion data for acceptance")
-      return
-    }
-
-    console.log("🎯 Accepting suggestion:", { id, replacement, originalText: suggestion.originalText })
-
-    try {
-      isAcceptingSuggestionRef.current = true
-      
-      // Preserve cursor position before API call
-      const selectionBeforeAccept = editor.selection
-
-      // Get current editor content
-      const fullText = slateToText(editor.children)
-      console.log("🎯 Current full text:", `"${fullText}"`)
-      
-      // Dynamically find the current position of the target text
-      const position = findTextPosition(suggestion.originalText, fullText)
-      if (!position) {
-        console.error("❌ Could not find target text in current document:", suggestion.originalText)
-        return
-      }
-
-      console.log("🎯 Found target text at positions:", position.start, "-", position.end)
-      
-      // Build offset-to-position mapping using current text length
-      const offsetToPosition: Array<{ path: number[], offset: number }> = []
-      let textOffset = 0
-
-      for (const [node, path] of Node.nodes(editor)) {
-        if (Text.isText(node)) {
-          for (let i = 0; i <= node.text.length; i++) {
-            offsetToPosition[textOffset + i] = { path, offset: i }
-          }
-          textOffset += node.text.length
-        } else if (path.length === 1 && textOffset > 0) {
-          const paragraphIndex = path[0]
-          if (paragraphIndex > 0) {
-            offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
-            textOffset += 1
-          }
-        }
-      }
-
-      const startPos = offsetToPosition[position.start]
-      const endPos = offsetToPosition[position.end]
-
-      if (!startPos || !endPos) {
-        console.error("❌ Could not map positions to Slate coordinates")
-        return
-      }
-
-      // Perform the replacement using Slate transforms
-      const range = { anchor: startPos, focus: endPos }
-      console.log("🎯 Slate range to replace:", range)
-      Transforms.select(editor, range)
-      Transforms.insertText(editor, replacement)
-
-      // Dismiss the suggestion from the store
-      dismiss(id)
-      
-      // Restore cursor position after a short delay
-      setTimeout(() => {
-        if (selectionBeforeAccept && !editor.selection) {
-          try {
-            Transforms.select(editor, selectionBeforeAccept)
-          } catch (error) {
-            // Silent fallback
-          }
-        }
-      }, 10)
-
-      console.log("✅ Successfully accepted suggestion and dismissed from store")
-
-    } catch (error) {
-      console.error("❌ Error accepting suggestion:", error)
-    } finally {
-      isAcceptingSuggestionRef.current = false
-    }
-  }, [suggestions, editor, dismiss, findTextPosition])
-
-  // Cleanup typing timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current)
-      }
-      isTypingRef.current = false
-      currentTypingLineRef.current = null
-    }
-  }, [])
 
   return (
     <div className="relative">
@@ -682,6 +676,8 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
               event.preventDefault()
               return
             }
+
+
 
             // Detect spacebar for immediate spell check
             if (event.key === ' ' && isFocused) {

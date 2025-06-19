@@ -142,9 +142,11 @@ const Leaf = ({ attributes, children, leaf }: any) => {
 
 // Convert HTML/rich text to Slate nodes
 const htmlToSlate = (html: string): Descendant[] => {
-  // For now, convert to plain text and create simple paragraph nodes
-  // This can be enhanced later to handle more complex HTML
-  const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
+  // Handle <br> tags first by converting them to newlines
+  let text = html.replace(/<br\s*\/?>/gi, '\n')
+  
+  // Then strip other HTML tags and convert entities
+  text = text.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
   
   if (!text.trim()) {
     return [{ type: 'paragraph', children: [{ text: '' }] }]
@@ -156,6 +158,12 @@ const htmlToSlate = (html: string): Descendant[] => {
     children: [{ text: line }]
   }))
 }
+
+// Test the round-trip conversion:
+// Input: "Line 1<br>Line 2<br>Line 3"
+// htmlToSlate: converts <br> to \n, then splits by \n → ["Line 1", "Line 2", "Line 3"]
+// slateToHtml: joins with \n, then replaces \n with <br> → "Line 1<br>Line 2<br>Line 3"
+// This preserves newlines correctly!
 
 // Convert Slate nodes to plain text (must match offset calculation logic)
 const slateToText = (nodes: Descendant[]): string => {

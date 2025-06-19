@@ -355,6 +355,12 @@ export const EditableContent = forwardRef<
   // Add debug for key callbacks that might be changing
   const stableDebouncedWordCompleteSpellCheck = useCallback(
     debounce(async (text: string, docId: string) => {
+      // Early return if no text content
+      if (!text || !text.trim()) {
+        console.log("🚫 SPELL: Skipping spell check - no text content")
+        return
+      }
+
       try {
         // Preserve cursor position before API call
         const selectionBeforeCheck = editor.selection
@@ -389,6 +395,12 @@ export const EditableContent = forwardRef<
 
   // Fast grammar check for sentence completion (period/newline)
   const sentenceCompleteGrammarCheck = useCallback(async (text: string, docId: string, trigger: string) => {
+    // Early return if no text content
+    if (!text || !text.trim()) {
+      console.log("🚫 GRAMMAR: Skipping grammar check - no text content")
+      return
+    }
+
     if (isGrammarCheckInProgress) {
       return
     }
@@ -429,6 +441,12 @@ export const EditableContent = forwardRef<
   // New: Debounced viral critique check
   const debouncedViralCritiqueCheck = useCallback(
     debounce(async (text: string) => {
+      // Early return if no text content
+      if (!text || !text.trim()) {
+        console.log("🚫 CRITIQUE: Skipping viral critique - no text content")
+        return
+      }
+
       if (isCheckingCritique || !documentIdRef.current) return
 
       try {
@@ -1000,6 +1018,37 @@ export const EditableContent = forwardRef<
       }
     }
   }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES
+
+  // Run initial checks on page load when content is available
+  useEffect(() => {
+    if (!initialContent || !documentId || !initialContent.trim()) {
+      return
+    }
+
+    console.log("🚀 EDITOR: ===== INITIAL LOAD CHECKS START =====")
+    console.log("🚀 EDITOR: Running initial checks for document:", documentId)
+    console.log("🚀 EDITOR: Content length:", initialContent.length)
+    
+    // Add a small delay to ensure editor is fully initialized
+    const timer = setTimeout(() => {
+      const plainText = slateToText(htmlToSlate(initialContent))
+      
+      if (plainText.trim()) {
+        console.log("🚀 EDITOR: Running initial spell check")
+        stableDebouncedWordCompleteSpellCheck(plainText, documentId)
+        
+        console.log("🚀 EDITOR: Running initial grammar check")
+        sentenceCompleteGrammarCheck(plainText, documentId, 'initial-load')
+        
+        console.log("🚀 EDITOR: Running initial viral critique check")
+        debouncedViralCritiqueCheck(plainText)
+      }
+      
+      console.log("🚀 EDITOR: ===== INITIAL LOAD CHECKS END =====")
+    }, 500) // 500ms delay to ensure editor is ready
+    
+    return () => clearTimeout(timer)
+  }, [documentId, initialContent, stableDebouncedWordCompleteSpellCheck, sentenceCompleteGrammarCheck, debouncedViralCritiqueCheck])
 
   // Update format state when selection changes
   useEffect(() => {

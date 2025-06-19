@@ -210,6 +210,10 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
   const [value, setValue] = useState<Descendant[]>(initialValue)
   const [isFocused, setIsFocused] = useState(false)
   const isAcceptingSuggestionRef = useRef(false)
+  const isTypingRef = useRef(false)
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const currentTypingLineRef = useRef<number | null>(null)
+  const [decorationTrigger, setDecorationTrigger] = useState(0)
   
   const { getAllSuggestions, dismiss, addSuggestions, getDismissedIds } = useSuggestStore()
   const suggestions = getAllSuggestions()
@@ -217,12 +221,13 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
   // Get current text for idle grammar checking
   const currentText = useMemo(() => slateToText(value), [value])
   
-  // Handle grammar suggestions from idle checker
-  const handleGrammarSuggestions = useCallback((grammarSuggestions: any[]) => {
-    console.log(`📝 Received ${grammarSuggestions.length} grammar suggestions from idle checker`)
+  // Handle spell and grammar suggestions from idle checker
+  const handleGrammarSuggestions = useCallback((allSuggestions: any[]) => {
+    console.log(`📝 EDITABLE: Received ${allSuggestions.length} suggestions from idle checker`)
+    console.log(`📝 EDITABLE: Suggestion types:`, allSuggestions.map(s => `${s.suggestionType}: "${s.originalText}"`))
     
     // Convert API suggestions to store format and add them
-    const storeSuggestions = grammarSuggestions.map(s => ({
+    const storeSuggestions = allSuggestions.map(s => ({
       id: s.id,
       documentId: 'editor', // Temporary document ID for editor
       versionNumber: 1,
@@ -232,17 +237,19 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
       startOffset: s.startOffset,
       endOffset: s.endOffset,
       confidence: s.confidence.toString(),
-      suggestionType: s.suggestionType as 'grammar',
+      suggestionType: s.suggestionType as 'grammar' | 'spelling',
       accepted: false,
       dismissed: false,
       createdAt: new Date()
     }))
     
+    console.log(`📝 EDITABLE: Adding ${storeSuggestions.length} suggestions to store`)
     addSuggestions(storeSuggestions)
+    console.log(`📝 EDITABLE: Store update completed`)
   }, [addSuggestions])
   
-  // Set up idle grammar checking
-  const { triggerCheck, cancelCheck, isChecking } = useIdleGrammarCheck({
+  // Set up idle spell and grammar checking
+  const { triggerSpellCheck, triggerGrammarCheck, triggerCheck, cancelCheck, isChecking } = useIdleGrammarCheck({
     text: currentText,
     isFocused,
     onSuggestions: handleGrammarSuggestions,
@@ -458,6 +465,17 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     return () => document.removeEventListener('acceptSuggestion', handleAcceptEvent)
   }, [handleAcceptSuggestion])
 
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+      isTypingRef.current = false
+      currentTypingLineRef.current = null
+    }
+  }, [])
+
   // Decorate function to add suggestion ranges
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
     const ranges: Range[] = []
@@ -469,6 +487,17 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     // Don't interfere with active selections during suggestion acceptance
     if (isAcceptingSuggestionRef.current) {
       return ranges
+    }
+
+    // Only hide decorations on the current line being typed, preserve others
+    if (isTypingRef.current && currentTypingLineRef.current !== null) {
+      // Check if this node is on the current line being typed
+      const nodeParagraphIndex = path[0]
+      if (nodeParagraphIndex === currentTypingLineRef.current) {
+        // Hide decorations only on the current line being typed
+        return ranges
+      }
+      // Continue showing decorations on other lines
     }
 
     const nodeText = node.text
@@ -527,7 +556,7 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     })
 
     return ranges
-  }, [suggestions, value, editor])
+  }, [suggestions, value, editor, decorationTrigger])
 
   const handleChange = (newValue: Descendant[]) => {
     // Skip updates during suggestion acceptance to prevent conflicts
@@ -536,6 +565,40 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
     }
 
     setValue(newValue)
+
+    // Detect typing to prevent decoration interference
+    const hasTextOperations = editor.operations.some(op => 
+      op.type === 'insert_text' || op.type === 'remove_text'
+    )
+    
+    if (hasTextOperations) {
+      isTypingRef.current = true
+      
+      // Track which line/paragraph is being typed on
+      const { selection } = editor
+      if (selection && Range.isCollapsed(selection)) {
+        const [, currentPath] = Editor.node(editor, selection.anchor.path)
+        // Get the paragraph index (first element of path)
+        currentTypingLineRef.current = currentPath[0] || 0
+        console.log("📝 Currently typing on line:", currentTypingLineRef.current)
+      }
+      
+      // Clear any existing timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+      
+      // Set a timeout to stop "typing" state after user pauses
+      typingTimeoutRef.current = setTimeout(() => {
+        isTypingRef.current = false
+        currentTypingLineRef.current = null
+        
+        // Trigger re-render through React state instead of Slate manipulation
+        // This preserves cursor position while updating decorations
+        setDecorationTrigger(prev => prev + 1)
+        console.log("📍 Decorations re-enabled, cursor position preserved")
+      }, 500) // 500ms delay after stopping typing
+    }
 
     // Log operations for debugging
     if (editor.operations.length > 0) {
@@ -553,22 +616,39 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
         </div>
       )}
       
-      {/* Debug panel */}
-      {suggestions.length > 0 && (
-        <div className="absolute top-2 left-2 z-10 bg-yellow-50 border border-yellow-200 p-2 rounded-md text-xs max-w-xs">
-          <p className="font-semibold mb-1">🐛 Debug: {suggestions.length} suggestions</p>
-          {suggestions.slice(0, 2).map(s => (
-            <div key={s.id} className="mb-1">
-              <button 
-                onClick={() => handleAcceptSuggestion(s.id, s.suggestedText || '')}
-                className="text-blue-600 hover:text-blue-800 underline text-xs mr-2"
-              >
-                Test Accept "{s.originalText}" → "{s.suggestedText}"
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Enhanced Debug panel */}
+      <div className="fixed top-4 right-4 z-50 bg-green-50 border border-green-200 p-2 rounded-md text-xs w-64 shadow-lg">
+        <p className="font-semibold mb-1">🐛 Live Debug Panel</p>
+        <p>💾 Store suggestions: {suggestions.length}</p>
+        <p>⚡ Checking: {isChecking ? 'YES' : 'NO'}</p>
+        <p>📍 Focus: {isFocused ? 'YES' : 'NO'}</p>
+        <p>⌨️ Typing: {isTypingRef.current ? 'YES' : 'NO'}</p>
+        <p>📍 Typing line: {currentTypingLineRef.current !== null ? currentTypingLineRef.current : 'None'}</p>
+        {suggestions.length > 0 ? (
+          <div className="mt-2 border-t pt-2">
+            <p className="font-semibold">Recent suggestions:</p>
+            {suggestions.slice(0, 3).map(s => (
+              <div key={s.id} className="mb-1 text-xs">
+                <span className={`px-1 rounded ${s.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100'}`}>
+                  {s.suggestionType}
+                </span>
+                : "{s.originalText}" → "{s.suggestedText}"
+                <button 
+                  onClick={() => handleAcceptSuggestion(s.id, s.suggestedText || '')}
+                  className="ml-1 text-blue-600 hover:text-blue-800 underline"
+                >
+                  ✓
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2 border-t pt-2">
+            <p className="text-gray-500">No suggestions yet</p>
+            <p className="text-xs text-gray-400">Try typing "recieve" + spacebar</p>
+          </div>
+        )}
+      </div>
       
       <Slate editor={editor} initialValue={value} onChange={handleChange}>
         <Editable
@@ -597,15 +677,23 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
               return
             }
 
-            // Cancel any pending grammar check when user starts typing
-            cancelCheck()
 
-            // Detect period for immediate grammar check
-            if (event.key === '.' && isFocused) {
+
+            // Detect spacebar for immediate spell check
+            if (event.key === ' ' && isFocused) {
+              // Schedule spell check after a short delay to let the text update
+              setTimeout(() => {
+                console.log("📝 Spacebar detected - triggering spell check")
+                triggerSpellCheck()
+              }, 100)
+            }
+
+            // Detect punctuation for immediate grammar check
+            if (['.', '!', '?'].includes(event.key) && isFocused) {
               // Schedule grammar check after a short delay to let the text update
               setTimeout(() => {
-                console.log("🎯 Period detected - triggering immediate grammar check")
-                triggerCheck()
+                console.log(`🎯 Punctuation "${event.key}" detected - triggering grammar check`)
+                triggerGrammarCheck()
               }, 100)
             }
 

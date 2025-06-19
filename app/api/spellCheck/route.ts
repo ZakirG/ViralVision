@@ -124,6 +124,7 @@ async function callLanguageToolSpelling(text: string): Promise<SpellingSuggestio
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now()
   try {
     const { userId } = await auth()
     if (!userId) {
@@ -138,16 +139,27 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`📝 Spell Check API: Processing ${text.length} chars, revision ${revision}`)
+    console.log(`📝 Text preview: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`)
 
     // Get spelling suggestions from LanguageTool
+    const apiStartTime = Date.now()
     const suggestions = await callLanguageToolSpelling(text)
+    const apiEndTime = Date.now()
+
+    console.log(`📝 LanguageTool API took ${apiEndTime - apiStartTime}ms`)
 
     // Filter out dismissed suggestions
     const filteredSuggestions = suggestions.filter(s => 
       !dismissedIds.includes(s.id)
     )
 
+    const totalTime = Date.now() - startTime
     console.log(`📝 Spell Check API: Found ${suggestions.length} suggestions, ${filteredSuggestions.length} after filtering`)
+    console.log(`📝 Total API response time: ${totalTime}ms`)
+
+    if (filteredSuggestions.length > 0) {
+      console.log(`📝 Suggestions found:`, filteredSuggestions.map(s => `"${s.originalText}" → "${s.suggestedText}"`))
+    }
 
     return NextResponse.json({
       suggestions: filteredSuggestions,

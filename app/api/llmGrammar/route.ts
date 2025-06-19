@@ -8,6 +8,7 @@ Includes 5s timeout and filters dismissed suggestions.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
+import writeGood from 'write-good'
 
 interface GrammarRequest {
   text: string
@@ -69,6 +70,47 @@ function splitIntoSentences(text: string): Array<{ sentence: string; startOffset
   }
   
   return sentences
+}
+
+// Process text with write-good and convert to our suggestion format
+function processWithWriteGood(text: string, dismissedIds: string[]): GrammarSuggestion[] {
+  console.log(`📝 Write-good: Processing ${text.length} chars`)
+  
+  try {
+    const suggestions = writeGood(text)
+    console.log(`📝 Write-good: Found ${suggestions.length} raw suggestions`)
+    
+    const grammarSuggestions: GrammarSuggestion[] = []
+    
+    for (const suggestion of suggestions) {
+      const id = `write_good_${suggestion.index}_${suggestion.index + suggestion.offset}_${Date.now()}`
+      
+      // Skip dismissed suggestions
+      if (dismissedIds.includes(id)) {
+        continue
+      }
+      
+      const grammarSuggestion: GrammarSuggestion = {
+        id,
+        originalText: text.substring(suggestion.index, suggestion.index + suggestion.offset),
+        suggestedText: '', // write-good doesn't provide replacements, just identifies issues
+        explanation: suggestion.reason,
+        startOffset: suggestion.index,
+        endOffset: suggestion.index + suggestion.offset,
+        confidence: 0.8, // Default confidence for write-good suggestions
+        suggestionType: 'grammar'
+      }
+      
+      grammarSuggestions.push(grammarSuggestion)
+    }
+    
+    console.log(`📝 Write-good: Converted to ${grammarSuggestions.length} grammar suggestions`)
+    return grammarSuggestions
+    
+  } catch (error) {
+    console.error("📝 Write-good error:", error)
+    return []
+  }
 }
 
 // Create optimized grammar checking prompt for GPT-4o-mini (more concise for speed)
@@ -190,6 +232,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`🚀 LLM Grammar API: Processing ${text.length} chars, revision ${revision}`)
 
+    // Use write-good for grammar checking instead of OpenAI
+    const writeGoodSuggestions = processWithWriteGood(text, dismissedIds)
+    
+    console.log(`✅ Write-good Grammar API: Found ${writeGoodSuggestions.length} suggestions`)
+
+    return NextResponse.json({
+      suggestions: writeGoodSuggestions,
+      revision
+    })
+
+    // The following OpenAI code is now disabled - we return early above
     // Split into sentences for parallel processing
     const sentences = splitIntoSentences(text)
     console.log(`📝 Split into ${sentences.length} sentences`)

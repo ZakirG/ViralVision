@@ -193,10 +193,10 @@ export default function EditorPage() {
             <div>
               <p className="font-medium mb-1">Automatic Checking:</p>
               <ul className="space-y-1 text-xs">
-                <li>• Wait 1 second after typing → spell check</li>
-                <li>• Type a period (.) → spell + grammar check</li>
-                <li>• Real-time highlighting in editor</li>
-                <li>• Parallel processing for speed</li>
+                <li>• Press spacebar → instant spell check</li>
+                <li>• Type punctuation (. ! ?) → instant grammar check</li>
+                <li>• Background processing continues while typing</li>
+                <li>• Smart throttling prevents duplicate requests</li>
               </ul>
             </div>
             <div>

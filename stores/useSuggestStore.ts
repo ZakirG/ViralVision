@@ -140,10 +140,16 @@ export const useSuggestStore = create<SuggestStore>()(
       let addedCount = 0
       let dismissedCount = 0
       
+      console.log(`📦 STORE: addSuggestions called with ${suggestions.length} suggestions`)
+      console.log(`📦 STORE: Current store has ${Object.keys(state.byId).length} suggestions`)
+      
       // Process incoming suggestions
       for (const suggestion of suggestions) {
+        console.log(`📦 STORE: Processing suggestion: ${suggestion.suggestionType} "${suggestion.originalText}" → "${suggestion.suggestedText}"`)
+        
         // Skip if suggestion is dismissed
         if (state.dismissed.has(suggestion.id)) {
+          console.log(`📦 STORE: Skipping dismissed suggestion: ${suggestion.id}`)
           dismissedCount++
           continue
         }
@@ -151,13 +157,17 @@ export const useSuggestStore = create<SuggestStore>()(
         // Add suggestion (will overwrite if exists)
         newById[suggestion.id] = suggestion
         addedCount++
+        console.log(`📦 STORE: Added suggestion with ID: ${suggestion.id}`)
       }
       
       console.log(`➕ Added suggestions: ${addedCount} added, ${dismissedCount} dismissed`)
+      console.log(`📦 STORE: New store will have ${Object.keys(newById).length} suggestions`)
       
       set({
         byId: newById
       })
+      
+      console.log(`📦 STORE: Store update completed, triggering re-render`)
     },
     
     // Getters

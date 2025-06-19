@@ -959,7 +959,7 @@ export default function GrammarlyEditor() {
                 >
                   <div className="flex items-center justify-center gap-1">
                     <div className="size-2 rounded-full bg-purple-600"></div>
-                    <span className="text-center leading-tight">Script Helper</span>
+                    <span className="text-center leading-tight">Script Critic</span>
                   </div>
                 </button>
                 <button
@@ -1013,11 +1013,8 @@ export default function GrammarlyEditor() {
                   <div className="space-y-6">
                     <div className="text-center">
                       <h3 className="mb-2 font-medium text-gray-900">
-                        Script Helper
+                        Script Critic
                       </h3>
-                      <p className="break-words text-sm text-gray-500">
-                        Get AI-powered feedback on your script's viral potential
-                      </p>
                     </div>
 
                     {/* Viral Critique Display */}
@@ -1130,7 +1127,7 @@ export default function GrammarlyEditor() {
                 <div className="shrink-0 border-b border-gray-200 p-4">
                   <div className="mb-4 flex items-center justify-between">
                     <h2 className="font-semibold text-gray-900">
-                      Review suggestions
+                      Spelling & Grammar
                     </h2>
                     <div className="flex size-6 items-center justify-center rounded-full bg-gray-100">
                       <span className="text-xs font-medium text-gray-600">
@@ -1269,7 +1266,7 @@ export default function GrammarlyEditor() {
                       onClick={() => console.log("Write viral hook")}
                     >
                       <div className="flex flex-col items-start">
-                        <span className="font-medium">Write a viral hook</span>
+                        <span className="font-medium">Add a viral hook</span>
                       </div>
                     </Button>
 

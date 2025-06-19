@@ -60,6 +60,39 @@ import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 import type { ViralCritique } from "@/actions/openai-critique-actions"
 
+// AI Quick Action Prompts
+const QUICK_ACTION_PROMPTS = {
+  shortenScript: `Rewrite this script to be under 30 seconds when spoken aloud. Keep the core message and key points, but make it much more concise and punchy. Focus on the most important information and remove any filler words or redundant phrases. The goal is to maintain impact while dramatically reducing length.`,
+  
+  addViralHook: `Add a compelling viral hook at the beginning of this script. The hook should grab attention within the first 3 seconds and make viewers want to keep watching. Use techniques like:
+- Start with a surprising fact or statistic
+- Ask a provocative question
+- Create curiosity or mystery
+- Use strong emotional language
+- Make a bold claim or promise
+Keep the rest of the script intact, just add the hook at the beginning.`,
+  
+  rewriteConversational: `Rewrite this script to sound more natural and conversational when spoken aloud. Make it feel like you're talking to a friend rather than reading from a script. Use:
+- Contractions (don't, can't, won't, etc.)
+- Natural speech patterns and flow
+- Conversational transitions
+- Relatable language and examples
+- Questions and direct address to the viewer
+Maintain the same core message but make it much more engaging and natural to speak.`,
+  
+  addOnscreenText: `Add suggestions for onscreen text that would enhance the video and stop a user dead in their tracks, make them curious to watch the video more. We only need to add onscreen text for the hook (first few sentences of the script) and then the call to action. Your hook text should be a different phrasing of the hook and offer different information than the script. A good hook: Grabs attention in the first 3 seconds. The general topic of the video should be immediately clear from the onscreen text hook. If the audience is niche, the hook should include a specific audience call-out so that audiences know whether the video is for them and they stop scrolling. The hook should contain a moment of emotional tension, expectation, suspense, or confusion that makes the user stop scrolling to resolve the tension. An example of a good hook: 'SCIENTISTS ARE PUTTING LIVING BRAIN CELLS INTO COMPUTERS'. Notice how the onscreen text hook is SPECIFIC, INTERESTING, UNIQUE, and summarizes the video topic.
+The onscreen text should be in square brackets, interspersed into the script. Format as: [SCREEN TEXT: "suggested text"] at appropriate points in the script.`,
+  
+  addDeliveryTips: `Add delivery tips and performance notes throughout this script to help with verbal delivery. Include suggestions for:
+- Pacing and timing
+- Emphasis on key words
+- Tone and emotion
+- Gestures or body language
+- Pauses and breaks
+- Voice inflection
+Format as: [DELIVERY: "tip"] at appropriate points in the script.`
+}
+
 interface FormatState {
   isBold: boolean
   isItalic: boolean
@@ -668,6 +701,95 @@ export default function GrammarlyEditor() {
       }, 1000) // 1 second delay to ensure content is fully inserted
     }
   }, [])
+
+  // Handle quick actions with AI rewriting
+  const handleQuickAction = useCallback(async (actionType: keyof typeof QUICK_ACTION_PROMPTS) => {
+    if (!documentContent.trim()) {
+      toast({
+        title: "No Content",
+        description: "Please add some content to the editor first.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (applyingViralCritiqueKey) {
+      toast({
+        title: "Action in Progress",
+        description: "Please wait for the current action to complete.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      setApplyingViralCritiqueKey(actionType)
+      setIsViralCritiqueUpdating(true)
+      
+      const prompt = QUICK_ACTION_PROMPTS[actionType]
+      const fullPrompt = `${prompt}\n\nScript:\n${documentContent}`
+      
+      // Call the rewrite action with the specific prompt
+      const result = await rewriteContentWithCritiqueAction(documentContent, fullPrompt)
+
+      if (result.isSuccess && result.data) {
+        // Replace the content in the editor
+        if (editorRef.current) {
+          editorRef.current.replaceContent(result.data)
+        } else {
+          console.error("Quick Action: Editor ref is null!")
+        }
+        
+        // Log analytics for quick action usage
+        if (documentId) {
+          await logFeatureUsageAction(
+            'quick_action_applied',
+            documentId,
+            {
+              actionType: actionType,
+              originalContentLength: documentContent.length,
+              newContentLength: result.data.length
+            }
+          )
+        }
+        
+        // Show success message
+        const actionNames = {
+          shortenScript: "Shortened script",
+          addViralHook: "Added viral hook",
+          rewriteConversational: "Made conversational",
+          addOnscreenText: "Added onscreen text",
+          addDeliveryTips: "Added delivery tips"
+        }
+        
+        toast({
+          title: "Content Updated!",
+          description: `${actionNames[actionType]} successfully`,
+          duration: 3000
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to apply quick action",
+          variant: "destructive"
+        })
+        console.error("Quick Action: Failed to apply:", result.message)
+      }
+    } catch (error) {
+      console.error("Quick Action: Error applying action:", error)
+      toast({
+        title: "Error",
+        description: "Failed to apply quick action. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setApplyingViralCritiqueKey(null)
+      // Delay clearing the update flag to prevent immediate reversion
+      setTimeout(() => {
+        setIsViralCritiqueUpdating(false)
+      }, 1000)
+    }
+  }, [documentContent, applyingViralCritiqueKey, documentId])
 
   // Helper function to get colors and labels for different critique types
   const getCritiqueTypeStyle = useCallback((key: string) => {
@@ -1284,6 +1406,22 @@ export default function GrammarlyEditor() {
             {activeMainTab === "smart-revise" && (
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="space-y-6">
+                  {/* Quick Action Loading Indicator */}
+                  {applyingViralCritiqueKey && (
+                    <div className="rounded-lg bg-blue-50 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="animate-spin h-4 w-4 border border-blue-400 border-t-transparent rounded-full"></div>
+                        <span className="text-sm text-blue-700">
+                          {applyingViralCritiqueKey === 'shortenScript' && "Shortening script..."}
+                          {applyingViralCritiqueKey === 'addViralHook' && "Adding viral hook..."}
+                          {applyingViralCritiqueKey === 'rewriteConversational' && "Making conversational..."}
+                          {applyingViralCritiqueKey === 'addOnscreenText' && "Adding onscreen text..."}
+                          {applyingViralCritiqueKey === 'addDeliveryTips' && "Adding delivery tips..."}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="text-center">
                     <h3 className="mb-2 font-medium text-gray-900">
                       Quick Actions
@@ -1298,7 +1436,8 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => {}}
+                      onClick={() => handleQuickAction('shortenScript')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1310,7 +1449,8 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => {}}
+                      onClick={() => handleQuickAction('addViralHook')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">Add a viral hook</span>
@@ -1320,7 +1460,8 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => {}}
+                      onClick={() => handleQuickAction('rewriteConversational')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1332,7 +1473,8 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => {}}
+                      onClick={() => handleQuickAction('addOnscreenText')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
@@ -1344,7 +1486,8 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => {}}
+                      onClick={() => handleQuickAction('addDeliveryTips')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">

@@ -229,13 +229,6 @@ export const EditableContent = forwardRef<
     
     if (currentSelection !== lastSelection) {
       // Only log if cursor jumps to beginning unexpectedly
-      if (currentSelection && currentSelection.anchor.offset === 0 && lastSelection && lastSelection.anchor.offset > 10) {
-        console.error(`🚨 CURSOR JUMP DETECTED: Position changed on render #${renderCountRef.current}:`, {
-          from: lastSelection ? `${lastSelection.anchor.path}:${lastSelection.anchor.offset}` : 'null',
-          to: currentSelection ? `${currentSelection.anchor.path}:${currentSelection.anchor.offset}` : 'null',
-          isCollapsed: currentSelection ? Range.isCollapsed(currentSelection) : false
-        })
-      }
       lastCursorPositionRef.current = currentSelection
     }
   })

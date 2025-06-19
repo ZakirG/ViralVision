@@ -20,21 +20,22 @@ import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Elemen
 import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { updateSuggestionsAfterOperations } from "@/utils/pathAnchors"
+import { critiqueViralAbilityAction, type ViralCritique } from "@/actions/openai-critique-actions"
 
 // Define custom types for Slate
-type CustomElement = {
-  type: 'paragraph'
+interface CustomElement {
+  type: "paragraph"
   children: CustomText[]
 }
 
-type CustomText = {
+interface CustomText {
   text: string
   bold?: boolean
   italic?: boolean
   underline?: boolean
   suggestion?: boolean
   suggestionId?: string
-  suggestionType?: 'spelling' | 'grammar' | string | null
+  suggestionType?: "spelling" | "grammar" | string | null
   title?: string
 }
 
@@ -69,6 +70,7 @@ interface EditableContentProps {
   onDirectSuggestionsUpdate?: (suggestions: Suggestion[]) => void // New: direct update to avoid DB round-trip
   suggestions?: Suggestion[] // Add suggestions as props
   isAcceptingSuggestion?: boolean // Add lock state to prevent concurrent operations
+  onViralCritiqueUpdate?: (critique: ViralCritique | null, isLoading: boolean) => void // New: viral critique callback
 }
 
 interface FormatState {
@@ -202,10 +204,12 @@ const slateToHtml = (nodes: Descendant[]): string => {
 export const EditableContent = forwardRef<
   EditableContentRef,
   EditableContentProps
->(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, onDirectSuggestionsUpdate, suggestions: propSuggestions = [], isAcceptingSuggestion = false }, ref) => {
+>(({ initialContent, onContentChange, onFormatStateChange, documentId, onSuggestionClick, onSuggestionsUpdated, onDirectSuggestionsUpdate, suggestions: propSuggestions = [], isAcceptingSuggestion = false, onViralCritiqueUpdate }, ref) => {
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
+  const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
+  const [isCheckingCritique, setIsCheckingCritique] = useState(false)
 
   // Use suggestions from props, filtered for validity after operations
   const filteredSuggestionsRef = useRef<Suggestion[]>([])
@@ -383,6 +387,36 @@ export const EditableContent = forwardRef<
     }
   }, [onSuggestionsUpdated, isGrammarCheckInProgress, editor])
 
+  // New: Debounced viral critique check
+  const debouncedViralCritiqueCheck = useCallback(
+    debounce(async (text: string) => {
+      if (isCheckingCritique || !documentIdRef.current) return
+
+      try {
+        setIsCheckingCritique(true)
+        onViralCritiqueUpdate?.(null, true) // Notify parent that we're loading
+        
+        const result = await critiqueViralAbilityAction(text)
+
+        if (result.isSuccess) {
+          setViralCritique(result.data)
+          onViralCritiqueUpdate?.(result.data, false) // Notify parent with result
+        } else {
+          // Optionally handle the error case, e.g., show a message
+          setViralCritique(null)
+          onViralCritiqueUpdate?.(null, false) // Notify parent of failure
+        }
+      } catch (error) {
+        console.error("Error getting viral critique:", error)
+        setViralCritique(null)
+        onViralCritiqueUpdate?.(null, false) // Notify parent of error
+      } finally {
+        setIsCheckingCritique(false)
+      }
+    }, 2000), // 2-second debounce
+    [isCheckingCritique, onViralCritiqueUpdate]
+  )
+
   // Detect if user just completed a word (typed space after letters)
   const isWordBoundary = useCallback((currentText: string, previousText: string): boolean => {
     if (currentText.length <= previousText.length) return false
@@ -515,6 +549,7 @@ export const EditableContent = forwardRef<
      
      if (isSentenceComplete && documentIdRef.current) {
        sentenceCompleteGrammarCheck(plainText, documentIdRef.current, 'sentence-end')
+       debouncedViralCritiqueCheck(plainText) // Trigger critique check
      }
     
     // Always update previous text after checks
@@ -532,6 +567,7 @@ export const EditableContent = forwardRef<
          const currentText = slateToText(value)
          if (currentText.trim() && documentIdRef.current) {
            sentenceCompleteGrammarCheck(currentText, documentIdRef.current, 'enter')
+           debouncedViralCritiqueCheck(currentText) // Trigger critique check
          }
        }, 100)
      }

@@ -53,6 +53,7 @@ import {
 import { targetedRecheckAction } from "@/actions/targeted-recheck-actions"
 import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
+import type { ViralCritique } from "@/actions/openai-critique-actions"
 
 interface FormatState {
   isBold: boolean
@@ -90,6 +91,8 @@ export default function GrammarlyEditor() {
   const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
   const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
   const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false)
+  const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
+  const [isViralCritiqueLoading, setIsViralCritiqueLoading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -578,6 +581,12 @@ export default function GrammarlyEditor() {
     }
   }, [isAcceptingSuggestion, refreshSuggestions])
 
+  // Viral critique update callback
+  const handleViralCritiqueUpdate = useCallback((critique: ViralCritique | null, isLoading: boolean) => {
+    setViralCritique(critique)
+    setIsViralCritiqueLoading(isLoading)
+  }, [])
+
   // Fetch suggestions when document loads or rejected suggestions change
   useEffect(() => {
     if (documentId && document) {
@@ -742,6 +751,7 @@ export default function GrammarlyEditor() {
                 suggestions={suggestions}
                 onSuggestionsUpdated={handleSuggestionsUpdated}
                 isAcceptingSuggestion={isAcceptingSuggestion}
+                onViralCritiqueUpdate={handleViralCritiqueUpdate}
               />
             </div>
           </div>
@@ -938,10 +948,23 @@ export default function GrammarlyEditor() {
           <>
             {/* Main tabs */}
             <div className="border-b border-gray-200">
-              <div className="flex">
+              <div className="grid grid-cols-4">
+                <button
+                  onClick={() => setActiveMainTab("script-helper")}
+                  className={`border-b-2 px-1 py-3 text-xs font-medium ${
+                    activeMainTab === "script-helper"
+                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    <div className="size-2 rounded-full bg-purple-600"></div>
+                    <span className="text-center leading-tight">Script Helper</span>
+                  </div>
+                </button>
                 <button
                   onClick={() => setActiveMainTab("review")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-1 py-3 text-xs font-medium ${
                     activeMainTab === "review"
                       ? "border-teal-500 bg-teal-50 text-teal-600"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
@@ -954,7 +977,7 @@ export default function GrammarlyEditor() {
                 </button>
                 <button
                   onClick={() => setActiveMainTab("smart-revise")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-1 py-3 text-xs font-medium ${
                     activeMainTab === "smart-revise"
                       ? "border-teal-500 bg-teal-50 text-teal-600"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
@@ -969,7 +992,7 @@ export default function GrammarlyEditor() {
                 </button>
                 <button
                   onClick={() => setActiveMainTab("ai-write")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-1 py-3 text-xs font-medium ${
                     activeMainTab === "ai-write"
                       ? "border-teal-500 bg-teal-50 text-teal-600"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
@@ -983,7 +1006,124 @@ export default function GrammarlyEditor() {
               </div>
             </div>
 
-            {/* Tab content - keep all existing tab content exactly the same */}
+            {/* Tab content */}
+            {activeMainTab === "script-helper" && (
+              <div className="flex flex-1 flex-col">
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <h3 className="mb-2 font-medium text-gray-900">
+                        Script Helper
+                      </h3>
+                      <p className="break-words text-sm text-gray-500">
+                        Get AI-powered feedback on your script's viral potential
+                      </p>
+                    </div>
+
+                    {/* Viral Critique Display */}
+                    {viralCritique ? (
+                      <div className="space-y-4">
+                        {/* Hook Analysis */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            🎣 Hook Analysis
+                          </h4>
+                          {isViralCritiqueLoading ? (
+                            <div className="flex items-center space-x-2 text-gray-600">
+                              <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
+                              <span className="text-sm">Analyzing hook...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {viralCritique.hook}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Pacing Analysis */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            ⚡ Pacing Analysis
+                          </h4>
+                          {isViralCritiqueLoading ? (
+                            <div className="flex items-center space-x-2 text-gray-600">
+                              <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
+                              <span className="text-sm">Analyzing pacing...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {viralCritique.pacing}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Clarity Analysis */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            💡 Clarity Analysis
+                          </h4>
+                          {isViralCritiqueLoading ? (
+                            <div className="flex items-center space-x-2 text-gray-600">
+                              <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
+                              <span className="text-sm">Analyzing clarity...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {viralCritique.clarity}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Engagement Analysis */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            🔥 Engagement Analysis
+                          </h4>
+                          {isViralCritiqueLoading ? (
+                            <div className="flex items-center space-x-2 text-gray-600">
+                              <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
+                              <span className="text-sm">Analyzing engagement...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {viralCritique.engagement}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Overall Assessment */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                            📊 Overall Assessment
+                          </h4>
+                          {isViralCritiqueLoading ? (
+                            <div className="flex items-center space-x-2 text-gray-600">
+                              <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
+                              <span className="text-sm">Generating assessment...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 leading-relaxed">
+                              {viralCritique.overall}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+                        <div className="text-4xl mb-4">✨</div>
+                        <h3 className="font-medium text-gray-900 mb-2">
+                          Ready to analyze your script
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          Keep typing to have your text analyzed for viral potential. We'll provide feedback on hook, pacing, clarity, and engagement.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeMainTab === "review" && (
               <div className="flex flex-1 flex-col">
                 {/* Review suggestions header */}

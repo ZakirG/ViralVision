@@ -32,14 +32,14 @@ type CustomText = {
   bold?: boolean
   italic?: boolean
   underline?: boolean
+  suggestion?: boolean
+  suggestionId?: string
+  suggestionType?: 'spelling' | 'grammar' | string | null
+  title?: string
 }
 
 type CustomRange = {
   anchor: { path: number[]; offset: number }
-  focus: { path: number[]; offset: number }
-  suggestion?: boolean
-  suggestionId?: string
-  title?: string
 }
 
 declare module 'slate' {
@@ -47,7 +47,6 @@ declare module 'slate' {
     Editor: BaseEditor & ReactEditor & HistoryEditor
     Element: CustomElement
     Text: CustomText
-    Range: CustomRange
   }
 }
 
@@ -88,11 +87,23 @@ export interface EditableContentRef {
   acceptSuggestion: (suggestion: Suggestion) => void
 }
 
-
-
 // Custom leaf component for rendering suggestions
 const Leaf = ({ attributes, children, leaf }: any) => {
   if (leaf.suggestion) {
+    const suggestionColor =
+      leaf.suggestionType === 'spelling'
+        ? 'rgba(255, 0, 0, 0.2)'
+        : leaf.suggestionType === 'grammar'
+        ? 'rgba(255, 255, 0, 0.3)'
+        : '#fce7f3'
+
+    const hoverColor =
+      leaf.suggestionType === 'spelling'
+        ? 'rgba(255, 0, 0, 0.4)'
+        : leaf.suggestionType === 'grammar'
+        ? 'rgba(255, 255, 0, 0.5)'
+        : '#fbb6ce'
+
     return (
       <span
         {...attributes}
@@ -100,16 +111,16 @@ const Leaf = ({ attributes, children, leaf }: any) => {
         data-suggestion-id={leaf.suggestionId}
         title={leaf.title || 'Click for suggestion'}
         style={{
-          backgroundColor: '#fce7f3',
+          backgroundColor: suggestionColor,
           borderRadius: '2px',
           padding: '1px 2px',
           transition: 'background-color 0.2s ease'
         }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#fbb6ce'
+        onMouseEnter={(e: React.MouseEvent<HTMLSpanElement>) => {
+          e.currentTarget.style.backgroundColor = hoverColor
         }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = '#fce7f3'
+        onMouseLeave={(e: React.MouseEvent<HTMLSpanElement>) => {
+          e.currentTarget.style.backgroundColor = suggestionColor
         }}
       >
         {children}
@@ -643,7 +654,7 @@ export const EditableContent = forwardRef<
 
   // Create decorations for suggestions with cursor protection
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
-    const ranges: Range[] = []
+    const ranges: (Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string })[] = []
     
     if (!Text.isText(node) || !suggestions.length) {
       return ranges
@@ -731,6 +742,7 @@ export const EditableContent = forwardRef<
             focus: { path, offset: rangeEnd },
             suggestion: true,
             suggestionId: suggestion.id,
+            suggestionType: suggestion.suggestionType,
             title: suggestion.explanation || 'Click for suggestion'
           })
         }

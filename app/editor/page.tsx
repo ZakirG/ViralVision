@@ -1029,8 +1029,8 @@ export default function GrammarlyEditor() {
                   ) : (
                     suggestions.map(suggestion => {
                       // Handle both spelling and grammar suggestions now
-                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100';
-                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-blue-500';
+                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-yellow-100';
+                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-yellow-500';
                       const suggestionLabel = suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar';
                       
                       return (

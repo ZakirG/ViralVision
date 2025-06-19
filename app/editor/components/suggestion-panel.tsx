@@ -82,7 +82,7 @@ export function SuggestionPanel({
       case 'spelling':
         return <AlertTriangle className="size-4 text-red-500" />
       case 'grammar':
-        return <BookOpen className="size-4 text-blue-500" />
+        return <BookOpen className="size-4 text-yellow-500" />
       default:
         return <AlertTriangle className="size-4 text-gray-500" />
     }

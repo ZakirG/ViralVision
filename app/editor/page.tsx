@@ -1078,9 +1078,9 @@ export default function GrammarlyEditor() {
                                   <Button
                                     size="sm"
                                     className="bg-teal-600 hover:bg-teal-700"
-                                    onClick={() => console.log(`Accept ${key} suggestion`)}
+                                    onClick={() => console.log(`Apply ${key} suggestion`)}
                                   >
-                                    Accept
+                                    Apply
                                   </Button>
                                   <Button 
                                     size="sm" 
@@ -1155,7 +1155,7 @@ export default function GrammarlyEditor() {
                                       handleSuggestionAccept(suggestion);
                                     }}
                                   >
-                                    Accept
+                                    Apply
                                   </Button>
                                   <Button 
                                     size="sm" 

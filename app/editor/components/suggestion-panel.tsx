@@ -38,7 +38,7 @@ export function SuggestionPanel({
       
       if (result.isSuccess) {
         toast({
-          title: "Suggestion Accepted",
+          title: "Suggestion Applied",
           description: "The suggestion has been applied to your text."
         })
         onAccept(suggestion)
@@ -176,11 +176,11 @@ export function SuggestionPanel({
               className="flex-1 bg-teal-600 hover:bg-teal-700"
             >
               {accepting ? (
-                "Accepting..."
+                "Applying..."
               ) : (
                 <>
                   <Check className="size-4 mr-2" />
-                  Accept
+                  Apply
                 </>
               )}
             </Button>

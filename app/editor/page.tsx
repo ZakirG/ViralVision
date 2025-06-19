@@ -1041,7 +1041,7 @@ export default function GrammarlyEditor() {
 
             {/* Tab content */}
                         {activeMainTab === "review" && (
-              <div className="flex flex-1 flex-col">
+              <div className="flex flex-1 flex-col overflow-y-scroll" id='wrapper-suggestions'>
                 {/* Script Critique Loading Indicator */}
                 {isViralCritiqueLoading && (!viralCritique || Object.keys(viralCritique).length === 0) && (
                   <div className="border-b border-gray-200 p-4">

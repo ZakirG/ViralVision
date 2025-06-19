@@ -103,9 +103,9 @@ export function SuggestionPanel({
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-80 bg-white shadow-xl border-l border-gray-200">
-      <Card className="h-full rounded-none border-0">
-        <CardHeader className="border-b border-gray-200 pb-4">
-          <div className="flex items-center justify-between">
+      <Card className="h-full rounded-none border-0" >
+        <CardHeader className="border-b border-gray-200 pb-4" >
+          <div className="flex items-center justify-between" >
             <div className="flex items-center gap-2">
               {getSuggestionIcon()}
               <CardTitle className="text-lg">

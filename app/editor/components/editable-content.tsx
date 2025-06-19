@@ -39,17 +39,8 @@ interface CustomText {
   title?: string
 }
 
-type CustomRange = {
-  anchor: { path: number[]; offset: number }
-}
-
-declare module 'slate' {
-  interface CustomTypes {
-    Editor: BaseEditor & ReactEditor & HistoryEditor
-    Element: CustomElement
-    Text: CustomText
-  }
-}
+// Custom types for Slate editor
+// Note: CustomTypes interface removed to avoid TypeScript conflicts
 
 // Simple debounce function
 function debounce<T extends (...args: any[]) => void>(func: T, delay: number): T {

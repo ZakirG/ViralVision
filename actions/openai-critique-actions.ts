@@ -19,27 +19,25 @@ interface OpenAIResponse {
   }>
 }
 
+// Make this more flexible - it can contain any string keys
 interface ViralCritique {
-  hook: string
-  pacing: string
-  clarity: string
-  engagement: string
-  overall: string
+  [key: string]: string
 }
 
 const VIRAL_CRITIQUE_PROMPT = `You are an expert in social media and viral marketing. Critique the following text as a script for a short-form video. Provide feedback on its potential to go viral as a short-form video.
 
-Analyze the text and provide specific, actionable feedback in the following JSON format:
+Analyze the text and provide specific, actionable feedback in JSON format. You can include any relevant categories for improvement, such as:
 
 {
   "hook": "Critique of the opening/hook - how well does it grab attention in the first 3 seconds?",
   "pacing": "Critique of the pacing and flow - does it maintain energy and momentum?",
   "clarity": "Critique of clarity and message - is the main point clear and easy to follow?",
   "engagement": "Critique of engagement potential - what elements would make viewers comment, share, or interact?",
-  "overall": "Overall assessment and key recommendations for improving viral potential"
+  "emotional_impact": "How well does it evoke emotions or create connection with viewers?",
+  "call_to_action": "Does it have a clear call to action or next step for viewers?"
 }
 
-Be concise but specific in each critique. Focus on actionable improvements. Return ONLY valid JSON, no preamble or markdown.`
+Feel free to include additional relevant categories or omit categories that don't apply. Each critique should be concise but specific and actionable. Return ONLY valid JSON, no preamble or markdown.`
 
 function createCritiquePrompt(text: string): string {
   return `${VIRAL_CRITIQUE_PROMPT}\n\nText to critique:\n\n"${text}"`
@@ -98,13 +96,27 @@ async function callOpenAICritique(text: string): Promise<ViralCritique | null> {
       // Parse the JSON response
       const critique = JSON.parse(content.trim()) as ViralCritique
       
-      // Validate that all required fields are present
-      if (!critique.hook || !critique.pacing || !critique.clarity || !critique.engagement || !critique.overall) {
-        console.error("🚀 OpenAI: Invalid critique structure:", critique)
+      // Validate that we have at least one critique field
+      const keys = Object.keys(critique)
+      if (keys.length === 0) {
+        console.error("🚀 OpenAI: Empty critique object:", critique)
         return null
       }
       
-      return critique
+      // Filter out any non-string values and ensure all values are strings
+      const validCritique: ViralCritique = {}
+      for (const [key, value] of Object.entries(critique)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          validCritique[key] = value.trim()
+        }
+      }
+      
+      if (Object.keys(validCritique).length === 0) {
+        console.error("🚀 OpenAI: No valid critique fields found")
+        return null
+      }
+      
+      return validCritique
     } catch (parseError) {
       console.error("🚀 OpenAI: Failed to parse JSON critique:", parseError)
       console.error("🚀 OpenAI: Raw content:", content)

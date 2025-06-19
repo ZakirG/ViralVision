@@ -81,6 +81,7 @@ export interface EditableContentRef {
   insertContent: (content: string) => void
   replaceContent: (content: string) => void
   triggerViralCritique: () => void
+  applyItalicToBrackets: () => void
 }
 
 // Custom leaf component for rendering suggestions
@@ -986,6 +987,74 @@ export const EditableContent = forwardRef<
         if (currentText.trim() && documentIdRef.current) {
           console.log("🚀 VIRAL CRITIQUE: Manually triggering viral critique check")
           debouncedViralCritiqueCheckRef.current?.(currentText)
+        }
+      },
+      applyItalicToBrackets: () => {
+        // Find all text wrapped in square brackets and apply italic formatting
+        const fullText = slateToText(editor.children)
+        const bracketRegex = /\[([^\]]+)\]/g
+        let match
+        const brackets: Array<{ start: number; end: number; text: string }> = []
+        
+        // Find all bracket matches
+        while ((match = bracketRegex.exec(fullText)) !== null) {
+          brackets.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            text: match[0]
+          })
+        }
+        
+        // Apply italic formatting to each bracket match
+        brackets.forEach(bracket => {
+          // Build a mapping of text offsets to Slate positions
+          const offsetToPosition: Array<{ path: number[], offset: number }> = []
+          let textOffset = 0
+          
+          // Walk through all text nodes to build offset mapping
+          for (const [node, path] of Node.nodes(editor)) {
+            if (Text.isText(node)) {
+              // Map each character position in this text node
+              for (let i = 0; i <= node.text.length; i++) {
+                offsetToPosition[textOffset + i] = { path, offset: i }
+              }
+              textOffset += node.text.length
+            } else if (path.length === 1 && textOffset > 0) {
+              // Only add newline offset if this is not the first paragraph
+              const paragraphIndex = path[0]
+              if (paragraphIndex > 0) {
+                offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
+                textOffset += 1
+              }
+            }
+          }
+          
+          // Get start and end positions for this bracket
+          const startPos = offsetToPosition[bracket.start]
+          const endPos = offsetToPosition[bracket.end]
+          
+          if (startPos && endPos) {
+            try {
+              // Create the selection range
+              const range = {
+                anchor: startPos,
+                focus: endPos
+              }
+              
+              // Select the range and apply italic formatting
+              Transforms.select(editor, range)
+              Editor.addMark(editor, 'italic', true)
+            } catch (error) {
+              // Silent error handling
+            }
+          }
+        })
+        
+        // Clear selection after applying formatting
+        try {
+          Transforms.deselect(editor)
+        } catch (error) {
+          // Silent error handling
         }
       }
     }

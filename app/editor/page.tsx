@@ -81,16 +81,18 @@ Keep the rest of the script intact, just add the hook at the beginning.`,
 Maintain the same core message but make it much more engaging and natural to speak.`,
   
   addOnscreenText: `Add suggestions for onscreen text that would enhance the video and stop a user dead in their tracks, make them curious to watch the video more. We only need to add onscreen text for the hook (first few sentences of the script) and then the call to action. Your hook text should be a different phrasing of the hook and offer different information than the script. A good hook: Grabs attention in the first 3 seconds. The general topic of the video should be immediately clear from the onscreen text hook. If the audience is niche, the hook should include a specific audience call-out so that audiences know whether the video is for them and they stop scrolling. The hook should contain a moment of emotional tension, expectation, suspense, or confusion that makes the user stop scrolling to resolve the tension. An example of a good hook: 'SCIENTISTS ARE PUTTING LIVING BRAIN CELLS INTO COMPUTERS'. Notice how the onscreen text hook is SPECIFIC, INTERESTING, UNIQUE, and summarizes the video topic.
-The onscreen text should be in square brackets, interspersed into the script. Format as: [SCREEN TEXT: "suggested text"] at appropriate points in the script.`,
+The onscreen text should be in square brackets, interspersed into the script. Format as: [Onscreen text: "suggested text"] at appropriate points in the script.`,
   
-  addDeliveryTips: `Add delivery tips and performance notes throughout this script to help with verbal delivery. Include suggestions for:
+  addDeliveryTips: `Add delivery tips and performance notes in 3-4 places in this script to help with verbal delivery of specific lines or phrases in the script.
 - Pacing and timing
 - Emphasis on key words
 - Tone and emotion
 - Gestures or body language
 - Pauses and breaks
 - Voice inflection
-Format as: [DELIVERY: "tip"] at appropriate points in the script.`
+Something to consider: hooks should generally be delivered with punchy, staccato inflection and at a generally fast pace.
+Format as: [Delivery tip: "tip"] at appropriate points in the script.
+Examples: [Delivery tip: Read this line with a staccato, punchy rhythm to emphasize how important this is.] [Delivery tip: Whisper the last few words of this line to make the idea seem like a secret.] [Delivery tip: Start the line out fast and then slow down towards then end to make the idea seem very dramatic.]`
 }
 
 interface FormatState {
@@ -634,6 +636,13 @@ export default function GrammarlyEditor() {
         // Replace the content in the editor using the editor's replaceContent method
         if (editorRef.current) {
           editorRef.current.replaceContent(result.data)
+          
+          // Apply italic formatting to text wrapped in square brackets
+          setTimeout(() => {
+            if (editorRef.current) {
+              editorRef.current.applyItalicToBrackets()
+            }
+          }, 100) // Small delay to ensure content is fully loaded
         } else {
           console.error("🚀 VIRAL CRITIQUE: Editor ref is null!")
         }
@@ -692,6 +701,13 @@ export default function GrammarlyEditor() {
     if (editorRef.current) {
       editorRef.current.insertContent(importedContent)
       
+      // Apply italic formatting to text wrapped in square brackets
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.applyItalicToBrackets()
+        }
+      }, 100) // Small delay to ensure content is fully loaded
+      
       // Trigger viral critique check after content import
       // Add a delay to ensure the content has been fully inserted
       setTimeout(() => {
@@ -736,6 +752,13 @@ export default function GrammarlyEditor() {
         // Replace the content in the editor
         if (editorRef.current) {
           editorRef.current.replaceContent(result.data)
+          
+          // Apply italic formatting to text wrapped in square brackets
+          setTimeout(() => {
+            if (editorRef.current) {
+              editorRef.current.applyItalicToBrackets()
+            }
+          }, 100) // Small delay to ensure content is fully loaded
         } else {
           console.error("Quick Action: Editor ref is null!")
         }

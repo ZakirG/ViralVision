@@ -79,6 +79,7 @@ export interface EditableContentRef {
   focus: () => void
   acceptSuggestion: (suggestion: Suggestion) => void
   insertContent: (content: string) => void
+  replaceContent: (content: string) => void
 }
 
 // Custom leaf component for rendering suggestions
@@ -202,6 +203,8 @@ export const EditableContent = forwardRef<
   const [isGrammarCheckInProgress, setIsGrammarCheckInProgress] = useState(false)
   const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
   const [isCheckingCritique, setIsCheckingCritique] = useState(false)
+  const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
+  const [isReplacingContent, setIsReplacingContent] = useState(false)
 
   // Use suggestions from props, filtered for validity after operations
   const filteredSuggestionsRef = useRef<Suggestion[]>([])
@@ -262,36 +265,72 @@ export const EditableContent = forwardRef<
 
   // Handle initialContent changes (e.g., when suggestion is accepted) - STABLE VERSION
   useEffect(() => {
-    if (!initialContent) return
+    console.log("🔄 EDITOR: ===== INITIAL CONTENT EFFECT START =====")
+    console.log("🔄 EDITOR: initialContent received:", initialContent ? initialContent.length : "null")
+    console.log("🔄 EDITOR: initialContent preview:", initialContent ? initialContent.substring(0, 50) + "..." : "null")
+    console.log("🔄 EDITOR: Stack trace:", new Error().stack?.split('\n').slice(1, 4).join('\n'))
+    
+    if (!initialContent) {
+      console.log("🔄 EDITOR: No initialContent, returning early")
+      return
+    }
 
+    console.log("🔄 EDITOR: initialContent changed, length:", initialContent.length)
+    
     const newValue = htmlToSlate(initialContent)
     const newText = slateToText(newValue)
     const currentText = slateToText(value)
     
+    console.log("🔄 EDITOR: ===== CONTENT COMPARISON =====")
+    console.log("🔄 EDITOR: New value from htmlToSlate:", JSON.stringify(newValue))
+    console.log("🔄 EDITOR: Current value:", JSON.stringify(value))
+    console.log("🔄 EDITOR: Content comparison:", {
+      newTextLength: newText.length,
+      currentTextLength: currentText.length,
+      textsEqual: newText === currentText,
+      previousTextLength: previousTextRef.current.length,
+      newTextPreview: newText.substring(0, 50) + "...",
+      currentTextPreview: currentText.substring(0, 50) + "..."
+    })
+    
     // Only update if the content actually changed 
     if (newText !== currentText && newText !== previousTextRef.current) {
+      console.log("🔄 EDITOR: ===== UPDATING EDITOR VALUE =====")
+      console.log("🔄 EDITOR: Updating editor value with new content")
+      console.log("🔄 EDITOR: New text:", newText)
+      console.log("🔄 EDITOR: Current text:", currentText)
+      
       // Preserve the current selection before updating
       if (editor.selection) {
         preservedSelectionRef.current = editor.selection
+        console.log("🔄 EDITOR: Preserved selection:", preservedSelectionRef.current)
       }
       
+      console.log("🔄 EDITOR: Calling setValue with new nodes")
       setValue(newValue)
       previousTextRef.current = newText
+      console.log("🔄 EDITOR: setValue called, previousTextRef updated")
       
       // Restore selection after a short delay to allow the update to process
       if (preservedSelectionRef.current) {
         setTimeout(() => {
           try {
             if (preservedSelectionRef.current && editor.selection !== preservedSelectionRef.current) {
+              console.log("🔄 EDITOR: Restoring selection")
               Transforms.select(editor, preservedSelectionRef.current)
             }
           } catch (error) {
-            // Silent fallback
+            console.error("🔄 EDITOR: Error restoring selection:", error)
           }
           preservedSelectionRef.current = null
         }, 10)
       }
+    } else {
+      console.log("🔄 EDITOR: Content unchanged, skipping update")
+      console.log("🔄 EDITOR: New text equals current text:", newText === currentText)
+      console.log("🔄 EDITOR: New text equals previous text:", newText === previousTextRef.current)
     }
+    console.log("🔄 EDITOR: ===== INITIAL CONTENT EFFECT END =====")
   }, [initialContent]) // Only depend on initialContent, not value or editor
 
   // Debug prop suggestions but DON'T cause re-renders
@@ -462,28 +501,18 @@ export const EditableContent = forwardRef<
     }
   }, [onFormatStateChange, isFormatActive])
 
-  // COMPLETELY STABLE handleChange - no dependencies that change
+  // Handle editor changes - STABILIZED VERSION
   const handleChange = useCallback((newValue: Descendant[]) => {
-    // Preserve the current selection immediately
+    console.log("🔄 EDITOR: ===== HANDLE CHANGE START =====")
+    console.log("🔄 EDITOR: handleChange called with newValue length:", newValue.length)
+    console.log("🔄 EDITOR: isReplacingContent flag:", isReplacingContent)
+    console.log("🔄 EDITOR: isViralCritiqueUpdating flag:", isViralCritiqueUpdating)
+    console.log("🔄 EDITOR: Stack trace:", new Error().stack?.split('\n').slice(1, 4).join('\n'))
+    
+    // Preserve current selection before any operations
     const currentSelection = editor.selection
     
-    // Track operations to update suggestion positions
-    const operations = editor.operations
-    if (operations.length > 0 && filteredSuggestionsRef.current.length > 0) {
-      // Update suggestions based on operations
-      const updatedSuggestions = updateSuggestionsAfterOperations(
-        operations,
-        filteredSuggestionsRef.current
-      )
-      
-      // Only update if suggestions actually changed to prevent unnecessary re-renders
-      if (updatedSuggestions.length !== filteredSuggestionsRef.current.length ||
-          updatedSuggestions.some((s, i) => s.id !== filteredSuggestionsRef.current[i]?.id)) {
-        filteredSuggestionsRef.current = updatedSuggestions
-        console.log(`📍 [PathAnchors] Updated suggestions after operations: ${operations.length} ops, ${updatedSuggestions.length} valid suggestions remain`)
-      }
-    }
-    
+    // Update the value state
     setValue(newValue)
     
     // Call updateFormatState directly instead of through dependency
@@ -499,9 +528,21 @@ export const EditableContent = forwardRef<
     
     const plainText = slateToText(newValue)
     const htmlContent = slateToHtml(newValue)
-    onContentChangeRef.current(htmlContent)
+    
+    console.log("🔄 EDITOR: Plain text length:", plainText.length)
+    console.log("🔄 EDITOR: HTML content length:", htmlContent.length)
+    console.log("🔄 EDITOR: Plain text preview:", plainText.substring(0, 50) + "...")
+    
+    // Don't call onContentChange during content replacement to prevent circular updates
+    if (!isReplacingContent) {
+      console.log("🔄 EDITOR: Calling onContentChange with htmlContent")
+      onContentChangeRef.current(htmlContent)
+    } else {
+      console.log("🎯 EDITOR: Skipping onContentChange during content replacement")
+    }
     
     if (isAcceptingSuggestionRef.current) {
+      console.log("🔄 EDITOR: Skipping further processing - accepting suggestion")
       return
     }
     
@@ -509,6 +550,7 @@ export const EditableContent = forwardRef<
     
     // Only proceed if text actually changed
     if (plainText === previousText || !documentIdRef.current || !plainText.trim()) {
+      console.log("🔄 EDITOR: Text unchanged or no document ID, skipping further processing")
       return
     }
     
@@ -528,26 +570,27 @@ export const EditableContent = forwardRef<
       return hasLettersAtEnd
     })()
     
-         if (isWordComplete && documentIdRef.current) {
-       stableDebouncedWordCompleteSpellCheck(plainText, documentIdRef.current)
-     }
-     
-     // Check for sentence completion (period, etc.)
-     const isSentenceComplete = (() => {
-       if (plainText.length <= previousText.length) return false
-       const lastChar = plainText[plainText.length - 1]
-       return /[.!?]/.test(lastChar)
-     })()
-     
-     if (isSentenceComplete && documentIdRef.current) {
-       sentenceCompleteGrammarCheck(plainText, documentIdRef.current, 'sentence-end')
-       debouncedViralCritiqueCheck(plainText) // Trigger critique check
-     }
+    if (isWordComplete && documentIdRef.current) {
+      stableDebouncedWordCompleteSpellCheck(plainText, documentIdRef.current)
+    }
+    
+    // Check for sentence completion (period, etc.)
+    const isSentenceComplete = (() => {
+      if (plainText.length <= previousText.length) return false
+      const lastChar = plainText[plainText.length - 1]
+      return /[.!?]/.test(lastChar)
+    })()
+    
+    if (isSentenceComplete && documentIdRef.current) {
+      sentenceCompleteGrammarCheck(plainText, documentIdRef.current, 'sentence-end')
+      debouncedViralCritiqueCheck(plainText) // Trigger critique check
+    }
     
     // Always update previous text after checks
     previousTextRef.current = plainText
+    console.log("🔄 EDITOR: ===== HANDLE CHANGE END =====")
     
-  }, [editor, onFormatStateChange]) // MINIMAL: Only stable dependencies
+  }, [editor, onFormatStateChange, isReplacingContent, isViralCritiqueUpdating]) // MINIMAL: Only stable dependencies
 
   // Simplified keyboard handler - only for shortcuts and Enter grammar check
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
@@ -875,6 +918,77 @@ export const EditableContent = forwardRef<
         
         // Focus the editor
         ReactEditor.focus(editor)
+      },
+      replaceContent: (content: string) => {
+        console.log("🎯 EDITOR: ===== REPLACE CONTENT START =====")
+        console.log("🎯 EDITOR: replaceContent called with content length:", content.length)
+        console.log("🎯 EDITOR: Content preview:", content.substring(0, 100) + "...")
+        console.log("🎯 EDITOR: Current editor value length:", value.length)
+        console.log("🎯 EDITOR: Current editor value:", JSON.stringify(value))
+        
+        // Set flags to prevent content reversion during viral critique update
+        console.log("🎯 EDITOR: Setting flags to prevent reversion")
+        setIsViralCritiqueUpdating(true)
+        setIsReplacingContent(true)
+        
+        // Convert the new content to Slate nodes
+        console.log("🎯 EDITOR: Converting content to Slate nodes")
+        const newNodes = htmlToSlate(content)
+        console.log("🎯 EDITOR: Converted to Slate nodes:", newNodes.length, "nodes")
+        console.log("🎯 EDITOR: New nodes:", JSON.stringify(newNodes))
+        
+        // Use Slate's Transforms API to directly update the editor content
+        console.log("🎯 EDITOR: Using Transforms to replace all content")
+        try {
+          // Clear the editor by removing all children
+          const rootChildren = Array.from(Node.children(editor, []))
+          for (let i = rootChildren.length - 1; i >= 0; i--) {
+            Transforms.removeNodes(editor, { at: [i] })
+          }
+          
+          // Insert the new content at the beginning
+          for (let i = 0; i < newNodes.length; i++) {
+            Transforms.insertNodes(editor, newNodes[i], { at: [i] })
+          }
+          
+          console.log("🎯 EDITOR: Transforms completed successfully")
+        } catch (error) {
+          console.error("🎯 EDITOR: Error using Transforms:", error)
+          // Fallback to setValue if Transforms fails
+          setValue(newNodes)
+        }
+        
+        // Also trigger the onContentChange callback to update parent state
+        console.log("🎯 EDITOR: Triggering onContentChange callback")
+        onContentChangeRef.current(content)
+        console.log("🎯 EDITOR: onContentChange callback completed")
+        
+        // Focus the editor after a short delay to ensure the content has updated
+        setTimeout(() => {
+          try {
+            console.log("🎯 EDITOR: ===== FOCUSING EDITOR =====")
+            console.log("🎯 EDITOR: Current editor value after Transforms:", JSON.stringify(editor.children))
+            console.log("🎯 EDITOR: Current editor value length:", editor.children.length)
+            console.log("🎯 EDITOR: Focusing editor after content update")
+            ReactEditor.focus(editor)
+            const endPoint = Editor.end(editor, [])
+            console.log("🎯 EDITOR: End point:", endPoint)
+            Transforms.select(editor, endPoint)
+            console.log("🎯 EDITOR: Content replacement completed successfully")
+            
+            // Clear the flags after a delay to allow the update to complete
+            setTimeout(() => {
+              console.log("🎯 EDITOR: Clearing flags")
+              setIsViralCritiqueUpdating(false)
+              setIsReplacingContent(false)
+              console.log("🎯 EDITOR: ===== REPLACE CONTENT END =====")
+            }, 500)
+          } catch (error) {
+            console.error("🎯 EDITOR: Error during content replacement:", error)
+            setIsViralCritiqueUpdating(false)
+            setIsReplacingContent(false)
+          }
+        }, 50) // Increased delay to ensure content update has propagated
       }
     }
   }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES

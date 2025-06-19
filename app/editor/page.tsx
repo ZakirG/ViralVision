@@ -51,9 +51,11 @@ import {
 import { 
   logSuggestionAcceptedAction, 
   logSuggestionRejectedAction,
-  logGrammarCheckAction 
+  logGrammarCheckAction,
+  logFeatureUsageAction
 } from "@/actions/analytics-actions"
 import { targetedRecheckAction } from "@/actions/targeted-recheck-actions"
+import { rewriteContentWithCritiqueAction } from "@/actions/openai-rewrite-actions"
 import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 import type { ViralCritique } from "@/actions/openai-critique-actions"
@@ -97,6 +99,9 @@ export default function GrammarlyEditor() {
   const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false)
   const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
   const [isViralCritiqueLoading, setIsViralCritiqueLoading] = useState(false)
+  const [applyingViralCritiqueKey, setApplyingViralCritiqueKey] = useState<string | null>(null)
+  const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
+  const [appliedViralCritiques, setAppliedViralCritiques] = useState<Set<string>>(new Set())
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -303,8 +308,16 @@ export default function GrammarlyEditor() {
 
   // Content handling functions
   const handleContentChange = useCallback((newContent: string) => {
+    console.log("📝 PARENT: handleContentChange called with content length:", newContent.length, "isViralCritiqueUpdating:", isViralCritiqueUpdating)
+    console.log("📝 PARENT: Current documentContent length:", documentContent.length)
+    console.log("📝 PARENT: Content changed:", newContent.length !== documentContent.length)
+    console.log("📝 PARENT: Stack trace:", new Error().stack?.split('\n').slice(1, 4).join('\n'))
+    
+    // Always update the document content, even during viral critique updates
+    // The editor is now updated directly, so we just need to sync the parent state
+    console.log("📝 PARENT: Updating document content")
     setDocumentContent(newContent)
-  }, [])
+  }, [documentContent])
 
   const handleFormatStateChange = useCallback((newFormatState: FormatState) => {
     setFormatState(newFormatState)
@@ -590,6 +603,89 @@ export default function GrammarlyEditor() {
     setViralCritique(critique)
     setIsViralCritiqueLoading(isLoading)
   }, [])
+
+  const handleViralCritiqueApply = useCallback(async (critiqueKey: string, critiqueValue: string) => {
+    if (applyingViralCritiqueKey || !documentContent.trim()) {
+      console.log("🚀 VIRAL CRITIQUE: Skipping apply - already applying or no content")
+      return
+    }
+
+    try {
+      setApplyingViralCritiqueKey(critiqueKey)
+      setIsViralCritiqueUpdating(true)
+      console.log("🚀 VIRAL CRITIQUE: Starting application for key:", critiqueKey)
+      console.log("🚀 VIRAL CRITIQUE: Current document content length:", documentContent.length)
+      console.log("🚀 VIRAL CRITIQUE: Applying suggestion:", { key: critiqueKey, value: critiqueValue })
+
+      // Call the rewrite action
+      const result = await rewriteContentWithCritiqueAction(documentContent, critiqueValue)
+
+      if (result.isSuccess && result.data) {
+        console.log("🚀 VIRAL CRITIQUE: OpenAI returned rewritten content:", {
+          originalLength: documentContent.length,
+          newLength: result.data.length,
+          newContent: result.data.substring(0, 200) + "..." // First 200 chars for debugging
+        })
+        
+        // Replace the content in the editor using the editor's replaceContent method
+        if (editorRef.current) {
+          console.log("🚀 VIRAL CRITIQUE: Calling editor.replaceContent()")
+          editorRef.current.replaceContent(result.data)
+        } else {
+          console.error("🚀 VIRAL CRITIQUE: Editor ref is null!")
+        }
+        
+        // Mark this viral critique as applied
+        setAppliedViralCritiques(prev => new Set([...prev, critiqueKey]))
+        console.log("🚀 VIRAL CRITIQUE: Marked as applied:", critiqueKey)
+        
+        // Note: setDocumentContent will be called by the editor's onContentChange callback
+        
+        // Log analytics for viral critique usage
+        if (documentId) {
+          await logFeatureUsageAction(
+            'viral_critique_applied',
+            documentId,
+            {
+              critiqueType: critiqueKey,
+              originalContentLength: documentContent.length,
+              newContentLength: result.data.length
+            }
+          )
+        }
+        
+        // Show success message
+        toast({
+          title: "Content Rewritten!",
+          description: `Applied ${critiqueKey.replace(/_/g, ' ')} suggestion`,
+          duration: 3000
+        })
+
+        console.log("🚀 VIRAL CRITIQUE: Successfully applied suggestion and updated content")
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to apply suggestion",
+          variant: "destructive"
+        })
+        console.error("🚀 VIRAL CRITIQUE: Failed to apply suggestion:", result.message)
+      }
+    } catch (error) {
+      console.error("🚀 VIRAL CRITIQUE: Error applying suggestion:", error)
+      toast({
+        title: "Error",
+        description: "Failed to apply suggestion. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setApplyingViralCritiqueKey(null)
+      // Delay clearing the update flag to prevent immediate reversion
+      setTimeout(() => {
+        console.log("🚀 VIRAL CRITIQUE: Clearing update flag")
+        setIsViralCritiqueUpdating(false)
+      }, 1000)
+    }
+  }, [documentContent, applyingViralCritiqueKey, documentId])
 
   const handleTikTokContentImport = useCallback((importedContent: string) => {
     // Use the editor's insertContent method to append the content
@@ -1052,50 +1148,65 @@ export default function GrammarlyEditor() {
                   </div>
                 )}
 
+                {/* Viral Critique Applying Indicator */}
+                {applyingViralCritiqueKey && (
+                  <div className="border-b border-gray-200 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="animate-spin h-4 w-4 border border-teal-400 border-t-transparent rounded-full"></div>
+                      <span className="text-sm text-gray-600">Applying suggestion...</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Viral Critique Suggestions */}
                 {viralCritique && Object.keys(viralCritique).length > 0 && (
                   <div className="space-y-0 border-b border-gray-200">
-                    {Object.entries(viralCritique).map(([key, value]) => {
-                      const style = getCritiqueTypeStyle(key)
-                      return (
-                        <div key={key} className="border-b border-gray-100 last:border-b-0">
-                          <div className="p-4 hover:bg-gray-50">
-                            <div className="flex items-start gap-3">
-                              <div className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${style.bg}`}>
-                                <div className={`size-2 rounded-full ${style.dot}`}></div>
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="mb-1 break-words text-sm font-medium text-gray-900">
-                                  {style.label}
+                    {Object.entries(viralCritique)
+                      .filter(([key, value]) => !appliedViralCritiques.has(key))
+                      .map(([key, value]) => {
+                        const style = getCritiqueTypeStyle(key)
+                        console.log("🎨 VIRAL CRITIQUE: Rendering suggestion:", key, "applied:", appliedViralCritiques.has(key))
+                        return (
+                          <div key={key} className="border-b border-gray-100 last:border-b-0">
+                            <div className="p-4 hover:bg-gray-50">
+                              <div className="flex items-start gap-3">
+                                <div className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${style.bg}`}>
+                                  <div className={`size-2 rounded-full ${style.dot}`}></div>
                                 </div>
-                                <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-                                  <span className="break-words">
-                                    {value}
-                                  </span>
-                                  <Info className="size-3 shrink-0" />
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <Button
-                                    size="sm"
-                                    className="bg-teal-600 hover:bg-teal-700"
-                                    onClick={() => console.log(`Apply ${key} suggestion`)}
-                                  >
-                                    Apply
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => console.log(`Dismiss ${key} suggestion`)}
-                                  >
-                                    Dismiss
-                                  </Button>
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-1 break-words text-sm font-medium text-gray-900">
+                                    {style.label}
+                                  </div>
+                                  <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                                    <span className="break-words">
+                                      {value}
+                                    </span>
+                                    <Info className="size-3 shrink-0" />
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      className="bg-teal-600 hover:bg-teal-700"
+                                      onClick={() => handleViralCritiqueApply(key, value)}
+                                      disabled={applyingViralCritiqueKey !== null}
+                                    >
+                                      {applyingViralCritiqueKey === key ? "Applying..." : "Apply"}
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => console.log(`Dismiss ${key} suggestion`)}
+                                      disabled={applyingViralCritiqueKey !== null}
+                                    >
+                                      Dismiss
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
                   </div>
                 )}
 

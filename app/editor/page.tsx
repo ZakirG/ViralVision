@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator"
 import {
   Menu,
   Target,
+  Settings,
   BarChart3,
   ChevronRight,
   ChevronLeft,
@@ -19,7 +20,8 @@ import {
   List,
   ListOrdered,
   Type,
-  ChevronDown
+  ChevronDown,
+  Video
 } from "lucide-react"
 import {
   EditableContent,
@@ -32,6 +34,7 @@ import {
 } from "@/components/ui/popover"
 import { ContentGoalsModal } from "./components/content-goals-modal"
 import { PerformanceModal } from "./components/performance-modal"
+import { ImportTikTokModal } from "./components/import-tiktok-modal"
 import { FloatingSidebar } from "./components/floating-sidebar"
 import { SuggestionPanel } from "./components/suggestion-panel"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -76,6 +79,7 @@ export default function GrammarlyEditor() {
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [goalsModalOpen, setGoalsModalOpen] = useState(false)
   const [performanceModalOpen, setPerformanceModalOpen] = useState(false)
+  const [tiktokModalOpen, setTiktokModalOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [formatState, setFormatState] = useState<FormatState>({
     isBold: false,
@@ -587,22 +591,18 @@ export default function GrammarlyEditor() {
     setIsViralCritiqueLoading(isLoading)
   }, [])
 
+  const handleTikTokContentImport = useCallback((importedContent: string) => {
+    // Use the editor's insertContent method to append the content
+    if (editorRef.current) {
+      editorRef.current.insertContent(importedContent)
+    }
+  }, [])
+
   // Helper function to get colors and labels for different critique types
   const getCritiqueTypeStyle = useCallback((key: string) => {
     // Define available color schemes
     const colorSchemes = [
-      { bg: 'bg-red-100', dot: 'bg-red-500' },
-      { bg: 'bg-blue-100', dot: 'bg-blue-500' },
-      { bg: 'bg-green-100', dot: 'bg-green-500' },
-      { bg: 'bg-purple-100', dot: 'bg-purple-500' },
-      { bg: 'bg-pink-100', dot: 'bg-pink-500' },
-      { bg: 'bg-orange-100', dot: 'bg-orange-500' },
-      { bg: 'bg-indigo-100', dot: 'bg-indigo-500' },
-      { bg: 'bg-yellow-100', dot: 'bg-yellow-500' },
-      { bg: 'bg-cyan-100', dot: 'bg-cyan-500' },
-      { bg: 'bg-emerald-100', dot: 'bg-emerald-500' },
-      { bg: 'bg-violet-100', dot: 'bg-violet-500' },
-      { bg: 'bg-rose-100', dot: 'bg-rose-500' }
+      { bg: 'bg-green-200', dot: 'bg-green-500' },
     ]
     
     // Create a simple hash from the key to consistently assign colors
@@ -750,17 +750,23 @@ export default function GrammarlyEditor() {
             ) : (
               <span className="text-sm text-gray-400">Saved</span>
             )} */}
-            <Button variant="outline" size="sm" onClick={handleSave}>
-              Save
-            </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-2"
               onClick={() => setGoalsModalOpen(true)}
             >
-              <Target className="size-4" />
+              <Settings className="size-4" />
               Content Goals
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setTiktokModalOpen(true)}
+            >
+              <Video className="size-4" />
+              Import script from TikTok
             </Button>
             <Button
               variant="outline"
@@ -999,7 +1005,7 @@ export default function GrammarlyEditor() {
                 >
                   <div className="flex items-center justify-center gap-1">
                     <div className="size-2 rounded-full bg-teal-600"></div>
-                    <span className="text-center leading-tight">Review</span>
+                    <span className="text-center leading-tight">Smart Review</span>
                   </div>
                 </button>
                 <button
@@ -1036,6 +1042,16 @@ export default function GrammarlyEditor() {
             {/* Tab content */}
                         {activeMainTab === "review" && (
               <div className="flex flex-1 flex-col">
+                {/* Script Critique Loading Indicator */}
+                {isViralCritiqueLoading && (!viralCritique || Object.keys(viralCritique).length === 0) && (
+                  <div className="border-b border-gray-200 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="animate-spin h-4 w-4 border border-purple-400 border-t-transparent rounded-full"></div>
+                      <span className="text-sm text-gray-600">Script critique loading...</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Viral Critique Suggestions */}
                 {viralCritique && Object.keys(viralCritique).length > 0 && (
                   <div className="space-y-0 border-b border-gray-200">
@@ -1052,19 +1068,12 @@ export default function GrammarlyEditor() {
                                 <div className="mb-1 break-words text-sm font-medium text-gray-900">
                                   {style.label}
                                 </div>
-                                {isViralCritiqueLoading ? (
-                                  <div className="flex items-center space-x-2 text-gray-600 mb-2">
-                                    <div className="animate-spin h-4 w-4 border border-gray-400 border-t-transparent rounded-full"></div>
-                                    <span className="text-xs">Analyzing {key.replace(/[_]/g, ' ')}...</span>
-                                  </div>
-                                ) : (
-                                  <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-                                    <span className="break-words">
-                                      {value}
-                                    </span>
-                                    <Info className="size-3 shrink-0" />
-                                  </div>
-                                )}
+                                <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                                  <span className="break-words">
+                                    {value}
+                                  </span>
+                                  <Info className="size-3 shrink-0" />
+                                </div>
                                 <div className="flex flex-wrap gap-2">
                                   <Button
                                     size="sm"
@@ -1326,6 +1335,11 @@ export default function GrammarlyEditor() {
         open={performanceModalOpen}
         onOpenChange={setPerformanceModalOpen}
         documentContent={documentContent}
+      />
+      <ImportTikTokModal
+        open={tiktokModalOpen}
+        onOpenChange={setTiktokModalOpen}
+        onContentImport={handleTikTokContentImport}
       />
 
       {/* Suggestion Panel */}

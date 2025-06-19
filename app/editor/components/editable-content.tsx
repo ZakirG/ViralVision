@@ -78,6 +78,7 @@ export interface EditableContentRef {
   toggleNumberedList: () => void
   focus: () => void
   acceptSuggestion: (suggestion: Suggestion) => void
+  insertContent: (content: string) => void
 }
 
 // Custom leaf component for rendering suggestions
@@ -861,7 +862,20 @@ export const EditableContent = forwardRef<
       focus: () => {
         ReactEditor.focus(editor)
       },
-      acceptSuggestion: acceptSuggestion
+      acceptSuggestion: acceptSuggestion,
+      insertContent: (content: string) => {
+        // Move cursor to the end of the document
+        const endPoint = Editor.end(editor, [])
+        Transforms.select(editor, endPoint)
+        
+        // Insert the content at the end
+        const currentText = slateToText(editor.children)
+        const separator = currentText.trim() ? '\n\n' : ''
+        Transforms.insertText(editor, separator + content)
+        
+        // Focus the editor
+        ReactEditor.focus(editor)
+      }
     }
   }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES
 

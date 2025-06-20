@@ -16,7 +16,7 @@ import { checkSpellingOptimizedAction } from "@/actions/languagetool-actions-opt
 import { checkGrammarWithOpenAIAction } from "@/actions/openai-grammar-actions"
 import { getSuggestionsByDocumentIdAction } from "@/actions/db/suggestions-actions"
 import type { Suggestion } from "@/db/schema"
-import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms, Operation } from "slate"
+import { createEditor, Descendant, Editor, Text, Range, Node, BaseEditor, Element, Transforms, Operation, Path } from "slate"
 import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { updateSuggestionsAfterOperations } from "@/utils/pathAnchors"
@@ -24,6 +24,17 @@ import { critiqueViralAbilityAction, type ViralCritique } from "@/actions/openai
 import { makeDecorations, createUnifiedDiff } from "./diff-highlighter"
 import { cn } from "@/lib/utils"
 import RevisionBar from "./revision-bar"
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { useToast } from '@/hooks/use-toast'
+
+// Extend Suggestion type to include isStale property
+interface ExtendedSuggestion extends Suggestion {
+  isStale?: boolean;
+}
 
 // Define custom types for Slate
 interface CustomElement {
@@ -98,6 +109,19 @@ export interface EditableContentRef {
 
 // Custom leaf component for rendering suggestions
 const Leaf = ({ attributes, children, leaf }: any) => {
+  // Debug: Log when leaf has suggestion properties
+  if (leaf.suggestion || leaf.spellingSuggestion || leaf.grammarSuggestion) {
+    console.log(`🎨 LEAF RENDER: Rendering leaf with suggestions:`, {
+      suggestion: leaf.suggestion,
+      spellingSuggestion: leaf.spellingSuggestion,
+      grammarSuggestion: leaf.grammarSuggestion,
+      spellingSuggestionId: leaf.spellingSuggestionId,
+      grammarSuggestionId: leaf.grammarSuggestionId,
+      suggestionId: leaf.suggestionId,
+      text: children?.props?.children || 'unknown'
+    })
+  }
+  
   // Build styles for multiple suggestion types
   const styles: React.CSSProperties = {}
   const className = ["suggestion-highlight cursor-pointer"]
@@ -118,6 +142,8 @@ const Leaf = ({ attributes, children, leaf }: any) => {
     if (leaf.spellingTitle || leaf.title) {
       dataAttributes.title = leaf.spellingTitle || leaf.title
     }
+    
+    console.log(`🎨 SPELLING STYLE: Applied spelling suggestion style for ID: ${leaf.spellingSuggestionId || leaf.suggestionId}`)
   }
   
   // Handle grammar suggestions with yellow background
@@ -133,6 +159,8 @@ const Leaf = ({ attributes, children, leaf }: any) => {
     if (leaf.grammarTitle || leaf.title) {
       dataAttributes.title = leaf.grammarTitle || leaf.title
     }
+    
+    console.log(`🎨 GRAMMAR STYLE: Applied grammar suggestion style for ID: ${leaf.grammarSuggestionId || leaf.suggestionId}`)
   }
   
   // Handle other suggestion types with pink background (fallback)
@@ -148,6 +176,8 @@ const Leaf = ({ attributes, children, leaf }: any) => {
     if (leaf.title) {
       dataAttributes.title = leaf.title
     }
+    
+    console.log(`🎨 OTHER STYLE: Applied other suggestion style for ID: ${leaf.suggestionId}`)
   }
   
   // Add transition for smooth hover effects
@@ -157,6 +187,12 @@ const Leaf = ({ attributes, children, leaf }: any) => {
   
   // Render with suggestions if any exist
   if (leaf.spellingSuggestion || leaf.grammarSuggestion || leaf.suggestion) {
+    console.log(`🎨 RENDERING SUGGESTION: Rendering span with styles:`, {
+      styles: Object.keys(styles),
+      dataAttributes: Object.keys(dataAttributes),
+      text: children?.props?.children || 'unknown'
+    })
+    
     return (
       <span
         {...attributes}
@@ -333,17 +369,24 @@ export const EditableContent = forwardRef<
   const contentChangeTriggerRef = useRef(0)
   
   // Update filtered suggestions when props change or operations occur
+  const [filteredSuggestions, setFilteredSuggestions] = useState<Suggestion[]>([]);
+  
   useEffect(() => {
-    filteredSuggestionsRef.current = propSuggestions.filter(s => 
+    console.log("BACKEND SUGGESTIONS:", JSON.stringify(propSuggestions.map(s => s.originalText)));
+    
+    const filtered = propSuggestions.filter(s => 
       s.startOffset != null && s.endOffset != null && s.startOffset < s.endOffset
     )
+    
+    setFilteredSuggestions(filtered);
+    filteredSuggestionsRef.current = filtered;
     
     // Force decoration update when suggestions change
     contentChangeTriggerRef.current += 1
   }, [propSuggestions])
   
-  const suggestions = filteredSuggestionsRef.current
-
+  const suggestions = filteredSuggestions;
+  
   // Add render counter and cursor tracking
   const renderCountRef = useRef(0)
   const lastCursorPositionRef = useRef<Range | null>(null)
@@ -826,373 +869,175 @@ export const EditableContent = forwardRef<
     }
   }, [editor]) // CRITICAL: Only depend on editor, not value
 
-  // Create decorations for suggestions with cursor protection
-  const decorate = useCallback(([node, path]: [Node, number[]]) => {
-    console.log(`🎯 DECORATE CALLED: Processing node at path ${path.join(',')}, isText: ${Text.isText(node)}`)
+  // Helper function to calculate text offset for a given path
+  const calculateTextOffset = useCallback((path: Path): number => {
+    let offset = 0;
     
-    // Debug: Show document structure occasionally
-    if (path.length === 0) {
-      console.log(`🎯 DOCUMENT STRUCTURE:`, JSON.stringify(value, null, 2))
-    }
-    
-    const ranges: (Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string } | Range & { added?: boolean; removed?: boolean })[] = []
-    
-    if (!Text.isText(node)) {
-      console.log(`🎯 DECORATE SKIP: Not a text node, skipping`)
-      return ranges
-    }
-
-    const nodeText = node.text
-    
-    // Skip empty text nodes as they interfere with suggestion highlighting
-    if (!nodeText || nodeText.trim() === '') {
-      console.log(`🎯 DECORATE SKIP: Empty text node, skipping`)
-      return ranges
-    }
-    
-    const fullText = slateToText(editor.children) // Get text directly from editor
-    
-    // Find the start offset of this text node in the full document
-    let textOffset = 0
-    console.log(`🎯 TEXT OFFSET CALCULATION: Starting calculation for path:`, path.join(','))
-    
-    for (const [n, p] of Node.nodes(editor)) {
-      if (path.length > 0 && p[0] < path[0]) {
-        if (Text.isText(n)) {
-          textOffset += n.text.length
-          console.log(`🎯 TEXT OFFSET: Added ${n.text.length} from text node at path ${p.join(',')}, total: ${textOffset}`)
+    for (const [node, nodePath] of Node.nodes(editor)) {
+      if (path.length > 0 && nodePath[0] < path[0]) {
+        if (Text.isText(node)) {
+          offset += node.text.length;
         }
         // Add 1 for paragraph breaks (newlines)
-        if (p.length === 1) {
-          textOffset += 1
-          console.log(`🎯 TEXT OFFSET: Added 1 for paragraph break at path ${p.join(',')}, total: ${textOffset}`)
+        if (nodePath.length === 1) {
+          offset += 1;
         }
-      } else if (path.length > 1 && p[0] === path[0] && p[1] < path[1]) {
-        if (Text.isText(n)) {
-          textOffset += n.text.length
-          console.log(`🎯 TEXT OFFSET: Added ${n.text.length} from text node at path ${p.join(',')}, total: ${textOffset}`)
+      } else if (path.length > 1 && nodePath[0] === path[0] && nodePath[1] < path[1]) {
+        if (Text.isText(node)) {
+          offset += node.text.length;
         }
-      } else if (p.length === path.length && p.every((val, i) => val === path[i])) {
-        console.log(`🎯 TEXT OFFSET: Reached current node, final offset: ${textOffset}`)
-        break
+      } else if (nodePath.length === path.length && nodePath.every((val, i) => val === path[i])) {
+        break;
       }
     }
+    
+    return offset;
+  }, [editor]);
 
-    // Add diff decorations if we're in diff mode and have combined diff decorations
-    if (diffMode && combinedDiffDecorations.length > 0) {
-      // Use character offset approach like suggestion decorations
-      const fullText = slateToText(editor.children) // Get text directly from editor
+  // Helper function to group ranges by position
+  const groupRangesByPosition = useCallback((ranges: Array<Range & { suggestionData: ExtendedSuggestion }>) => {
+    const groups: Array<{ start: number; end: number; suggestions: ExtendedSuggestion[] }> = [];
+    
+    for (const range of ranges) {
+      const start = range.anchor.offset;
+      const end = range.focus.offset;
       
-      // Find the start offset of this text node in the full document
-      let diffTextOffset = 0
-      for (const [n, p] of Node.nodes(editor)) {
-        if (path.length > 0 && p[0] < path[0]) {
-          if (Text.isText(n)) {
-            diffTextOffset += n.text.length
-          }
-          // Add 1 for paragraph breaks (newlines)
-          if (p.length === 1) {
-            diffTextOffset += 1
-          }
-        } else if (path.length > 1 && p[0] === path[0] && p[1] < path[1]) {
-          if (Text.isText(n)) {
-            diffTextOffset += n.text.length
-          }
-        } else if (p.length === path.length && p.every((val, i) => val === path[i])) {
-          break
-        }
-      }
-      
-      // Apply combined diff decorations using character offsets
-      combinedDiffDecorations.forEach(decoration => {
-        // Check if this decoration overlaps with this text node
-        const nodeStart = diffTextOffset
-        const nodeEnd = diffTextOffset + nodeText.length
-        
-        if (decoration.start < nodeEnd && decoration.end > nodeStart) {
-          // Calculate the range within this text node
-          const rangeStart = Math.max(0, decoration.start - nodeStart)
-          const rangeEnd = Math.min(nodeText.length, decoration.end - nodeStart)
-          
-          if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
-            const newRange = {
-              anchor: { path, offset: rangeStart },
-              focus: { path, offset: rangeEnd },
-              ...(decoration.added && { added: true }),
-              ...(decoration.removed && { removed: true })
-            } as Range & { added?: boolean; removed?: boolean }
-            
-            ranges.push(newRange)
-          }
-        }
-      })
-    }
-
-    // Add suggestion decorations
-    if (suggestions.length) {
-      // Track stale suggestion IDs for cleanup (but don't cleanup during active typing)
-      const staleSuggestionIds: string[] = []
-
-      console.log(`🎯 DECORATE: Processing ${suggestions.length} suggestions for text node:`, {
-        nodeText: nodeText.substring(0, 50) + (nodeText.length > 50 ? '...' : ''),
-        textOffset,
-        path: path.join(','),
-        fullTextLength: fullText.length
-      })
-
-      // Group suggestions by their ranges to support multiple types on the same text
-      const rangeGroups = new Map<string, Suggestion[]>()
-      
-      suggestions.forEach((suggestion) => {
-        if (suggestion.startOffset == null || suggestion.endOffset == null) {
-          return
-        }
-
-        const suggestionStart = suggestion.startOffset
-        const suggestionEnd = suggestion.endOffset
-        
-        console.log(`🎯 SUGGESTION: Processing suggestion ${suggestion.id}:`, {
-          type: suggestion.suggestionType,
-          originalText: suggestion.originalText,
-          startOffset: suggestionStart,
-          endOffset: suggestionEnd,
-          textOffset,
-          nodeTextLength: nodeText.length
-        })
-        
-        // ENHANCED SAFETY CHECK: Verify the suggestion offsets are still valid for current text
-        if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
-          console.log(`🧹 OFFSET INVALID: Marking suggestion as stale due to invalid offsets:`, {
-            id: suggestion.id,
-            startOffset: suggestionStart,
-            endOffset: suggestionEnd,
-            fullTextLength: fullText.length
-          })
-          staleSuggestionIds.push(suggestion.id)
-          return
-        }
-
-        // ENHANCED TEXT MISMATCH CHECK: verify the text at the offset still matches what we expect
-        const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
-        
-        // Normalize both texts for comparison (trim whitespace, normalize spaces)
-        const normalizeText = (text: string) => text.trim().replace(/\s+/g, ' ')
-        const normalizedCurrent = normalizeText(currentTextAtOffset)
-        const normalizedOriginal = suggestion.originalText ? normalizeText(suggestion.originalText) : ''
-        
-        // Debug logging for text comparison
-        if (suggestion.originalText && normalizedCurrent !== normalizedOriginal) {
-          console.log(`🧹 TEXT COMPARISON DEBUG:`, {
-            id: suggestion.id,
-            type: suggestion.suggestionType,
-            original: suggestion.originalText,
-            current: currentTextAtOffset,
-            normalizedOriginal,
-            normalizedCurrent,
-            startOffset: suggestionStart,
-            endOffset: suggestionEnd
-          })
-        }
-        
-        // Only mark as stale if there's a significant mismatch (not just whitespace differences)
-        if (suggestion.originalText && normalizedCurrent !== normalizedOriginal) {
-          // Additional check: only mark as stale if the difference is substantial
-          // (more than just case differences or minor punctuation)
-          const currentLower = normalizedCurrent.toLowerCase()
-          const originalLower = normalizedOriginal.toLowerCase()
-          
-          if (currentLower !== originalLower) {
-            console.log(`🧹 TEXT MISMATCH: Marking suggestion as stale:`, {
-              id: suggestion.id,
-              type: suggestion.suggestionType,
-              original: suggestion.originalText,
-              current: currentTextAtOffset,
-              normalizedOriginal,
-              normalizedCurrent
-            })
-            staleSuggestionIds.push(suggestion.id)
-            return
-          }
-        }
-
-        // ADDITIONAL CHECK: Skip suggestions for incomplete words (common in spell checking)
-        if (suggestion.suggestionType === 'spelling' && suggestion.originalText) {
-          // Check if this appears to be a partial word by looking at surrounding characters
-          const beforeChar = suggestionStart > 0 ? fullText[suggestionStart - 1] : ' '
-          const afterChar = suggestionEnd < fullText.length ? fullText[suggestionEnd] : ' '
-          
-          // If the word appears to be incomplete (no spaces around it), skip it
-          const isIncompleteWord = /[a-zA-Z]/.test(beforeChar) || /[a-zA-Z]/.test(afterChar)
-          if (isIncompleteWord && suggestion.originalText.length < 3) {
-            staleSuggestionIds.push(suggestion.id)
-            return
-          }
-        }
-        
-        // Check if this suggestion overlaps with this text node
-        const nodeStart = textOffset
-        const nodeEnd = textOffset + nodeText.length
-        
-        console.log(`🎯 OVERLAP CHECK: Checking if suggestion overlaps with text node:`, {
-          suggestionId: suggestion.id,
-          suggestionStart,
-          suggestionEnd,
-          nodeStart,
-          nodeEnd,
-          nodeTextLength: nodeText.length,
-          overlaps: suggestionStart < nodeEnd && suggestionEnd > nodeStart
-        })
-        
-        if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
-          // Calculate the range within this text node
-          const rangeStart = Math.max(0, suggestionStart - nodeStart)
-          const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
-          
-          console.log(`🎯 RANGE CALCULATION: Calculated range for suggestion:`, {
-            suggestionId: suggestion.id,
-            rangeStart,
-            rangeEnd,
-            nodeTextLength: nodeText.length,
-            isValid: rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length
-          })
-          
-          if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
-            // Group suggestions by their range
-            const rangeKey = `${rangeStart}-${rangeEnd}`
-            if (!rangeGroups.has(rangeKey)) {
-              rangeGroups.set(rangeKey, [])
-            }
-            rangeGroups.get(rangeKey)!.push(suggestion)
-          } else {
-            console.log(`🎯 RANGE INVALID: Range calculation resulted in invalid range:`, {
-              suggestionId: suggestion.id,
-              rangeStart,
-              rangeEnd,
-              nodeTextLength: nodeText.length
-            })
-          }
-        } else {
-          console.log(`🎯 NO OVERLAP: Suggestion does not overlap with current text node:`, {
-            suggestionId: suggestion.id,
-            suggestionStart,
-            suggestionEnd,
-            nodeStart,
-            nodeEnd
-          })
-        }
-      })
-
-      // Create combined decorations for each range group
-      rangeGroups.forEach((suggestionsInRange, rangeKey) => {
-        const [rangeStart, rangeEnd] = rangeKey.split('-').map(Number)
-        
-        // Find spelling and grammar suggestions in this range
-        const spellingSuggestion = suggestionsInRange.find(s => s.suggestionType === 'spelling')
-        const grammarSuggestion = suggestionsInRange.find(s => s.suggestionType === 'grammar')
-        const otherSuggestions = suggestionsInRange.filter(s => 
-          s.suggestionType !== 'spelling' && s.suggestionType !== 'grammar'
-        )
-        
-        // Create combined decoration properties
-        const decorationProps: any = {
-          anchor: { path, offset: rangeStart },
-          focus: { path, offset: rangeEnd }
-        }
-        
-        // Add spelling suggestion properties
-        if (spellingSuggestion) {
-          decorationProps.spellingSuggestion = true
-          decorationProps.spellingSuggestionId = spellingSuggestion.id
-          decorationProps.spellingTitle = spellingSuggestion.explanation || 'Click for spelling suggestion'
-        }
-        
-        // Add grammar suggestion properties
-        if (grammarSuggestion) {
-          decorationProps.grammarSuggestion = true
-          decorationProps.grammarSuggestionId = grammarSuggestion.id
-          decorationProps.grammarTitle = grammarSuggestion.explanation || 'Click for grammar suggestion'
-        }
-        
-        // Add other suggestion properties (fallback to old system for compatibility)
-        if (otherSuggestions.length > 0) {
-          const otherSuggestion = otherSuggestions[0] // Take the first one
-          decorationProps.suggestion = true
-          decorationProps.suggestionId = otherSuggestion.id
-          decorationProps.suggestionType = otherSuggestion.suggestionType
-          decorationProps.title = otherSuggestion.explanation || 'Click for suggestion'
-        }
-        
-        // If we have any suggestions, add the decoration
-        if (spellingSuggestion || grammarSuggestion || otherSuggestions.length > 0) {
-          console.log(`🎯 ADDING COMBINED RANGE: Adding combined suggestion range to decorations:`, {
-            rangeStart,
-            rangeEnd,
-            path: path.join(','),
-            text: nodeText.substring(rangeStart, rangeEnd),
-            spellingSuggestion: !!spellingSuggestion,
-            grammarSuggestion: !!grammarSuggestion,
-            otherSuggestions: otherSuggestions.length
-          })
-          
-          ranges.push(decorationProps as Range & { 
-            spellingSuggestion?: boolean
-            grammarSuggestion?: boolean
-            spellingSuggestionId?: string
-            grammarSuggestionId?: string
-            spellingTitle?: string
-            grammarTitle?: string
-            suggestion?: boolean
-            suggestionId?: string
-            suggestionType?: string | null
-            title?: string
-          })
-        }
-      })
-
-      // Only cleanup stale suggestions if user is not actively typing (to prevent cursor disruption)
-      if (staleSuggestionIds.length > 0) {
-        const now = Date.now()
-        const timeSinceLastChange = now - lastSpellCheckTimeRef.current
-        
-        console.log(`🧹 CLEANUP TRIGGER: Stale suggestions detected:`, {
-          staleCount: staleSuggestionIds.length,
-          staleIds: staleSuggestionIds,
-          timeSinceLastChange,
-          willCleanup: timeSinceLastChange > 5000,
-          cleanupInProgress: cleanupInProgressRef.current
-        })
-        
-        // Wait at least 5 seconds after last typing before cleaning up to prevent continuous calls
-        if (timeSinceLastChange > 5000) {
-          // Use a ref to track if cleanup is already in progress
-          if (!cleanupInProgressRef.current) {
-            cleanupInProgressRef.current = true
-            console.log(`🧹 CLEANUP SCHEDULING: Scheduling cleanup for ${staleSuggestionIds.length} suggestions`)
-            setTimeout(() => {
-              debouncedCleanupStaleSuggestions(staleSuggestionIds)
-              cleanupInProgressRef.current = false
-            }, 1000) // 1 second delay to avoid interfering with typing
-          } else {
-            console.log(`🧹 CLEANUP SKIPPED: Cleanup already in progress`)
-          }
-        } else {
-          console.log(`🧹 CLEANUP SKIPPED: Too soon after last change (${timeSinceLastChange}ms < 5000ms)`)
-        }
+      // Find existing group with same position
+      const existingGroup = groups.find(g => g.start === start && g.end === end);
+      if (existingGroup) {
+        existingGroup.suggestions.push(range.suggestionData);
+      } else {
+        groups.push({ start, end, suggestions: [range.suggestionData] });
       }
     }
+    
+    return groups;
+  }, []);
 
-    return ranges
-  }, [
-    // CRITICAL: Use stable suggestion dependency to prevent re-renders
-    suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
-    contentChangeTriggerRef.current,
-    editor,
-    baseline,
-    diffMode,
-    newContent,
-    combinedDiffText,
-    combinedDiffDecorations
-  ]) // Added newContent dependency for diff decorations
+  // Decorate function for highlighting suggestions
+  const decorate = useCallback(([node, path]: [Node, Path]) => {
+    // Only process text nodes
+    if (!Text.isText(node)) {
+      return [];
+    }
+
+    // Only log essential information
+    if (suggestions.length === 0) {
+      return [];
+    }
+
+    const text = node.text;
+    if (!text || text.length === 0) {
+      return [];
+    }
+
+    // Calculate text offset for this node
+    const textOffset = calculateTextOffset(path);
+    
+    const ranges: Array<Range & { suggestionData: ExtendedSuggestion }> = [];
+
+    // Process each suggestion
+    for (const suggestion of suggestions as ExtendedSuggestion[]) {
+      // Skip stale suggestions
+      if (suggestion.isStale) {
+        continue;
+      }
+
+      // Check if suggestion overlaps with this text node
+      const suggestionStart = suggestion.startOffset;
+      const suggestionEnd = suggestion.endOffset;
+      
+      if (suggestionStart === null || suggestionEnd === null) {
+        continue;
+      }
+      
+      const nodeStart = textOffset;
+      const nodeEnd = textOffset + text.length;
+
+      if (suggestionStart >= nodeEnd || suggestionEnd <= nodeStart) {
+        continue; // No overlap
+      }
+
+      // Calculate range within this node
+      const rangeStart = Math.max(0, suggestionStart - nodeStart);
+      const rangeEnd = Math.min(text.length, suggestionEnd - nodeStart);
+
+      if (rangeStart >= rangeEnd) {
+        continue;
+      }
+
+      // Validate the text matches using the full document text for accuracy
+      const fullText = slateToText(editor.children);
+      const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd);
+      const originalText = suggestion.originalText;
+      if (!originalText) {
+        continue;
+      }
+      
+      // More robust text comparison - normalize both texts
+      const normalizedOriginal = originalText.replace(/\s+/g, ' ').trim();
+      const normalizedCurrent = currentTextAtOffset.replace(/\s+/g, ' ').trim();
+
+      // More lenient matching - check if the original text is contained within the current text
+      // This handles cases where there might be extra punctuation or whitespace
+      const isContained = normalizedCurrent.includes(normalizedOriginal) || 
+                         normalizedOriginal.includes(normalizedCurrent) ||
+                         normalizedOriginal === normalizedCurrent;
+
+      if (!isContained) {
+        // Mark as stale and skip
+        suggestion.isStale = true;
+        continue;
+      }
+
+      const rangeWithSuggestion = {
+        anchor: { path, offset: rangeStart },
+        focus: { path, offset: rangeEnd },
+        suggestionData: suggestion
+      };
+      ranges.push(rangeWithSuggestion);
+    }
+
+    // Group ranges by position and create combined decorations
+    const groupedRanges = groupRangesByPosition(ranges);
+    
+    const decorations: Range[] = [];
+
+    for (const group of groupedRanges) {
+      const { start, end, suggestions: groupSuggestions } = group;
+      
+      const spellingSuggestion = groupSuggestions.find(s => s.suggestionType === 'spelling');
+      const grammarSuggestion = groupSuggestions.find(s => s.suggestionType === 'grammar');
+      const otherSuggestions = groupSuggestions.filter(s => s.suggestionType !== 'spelling' && s.suggestionType !== 'grammar');
+
+      const decoration: any = {
+        anchor: { path, offset: start },
+        focus: { path, offset: end }
+      };
+
+      if (spellingSuggestion) {
+        decoration.spellingSuggestion = true;
+        decoration.spellingSuggestionId = spellingSuggestion.id;
+        decoration.spellingTitle = spellingSuggestion.explanation || 'Click for spelling suggestion';
+      }
+      if (grammarSuggestion) {
+        decoration.grammarSuggestion = true;
+        decoration.grammarSuggestionId = grammarSuggestion.id;
+        decoration.grammarTitle = grammarSuggestion.explanation || 'Click for grammar suggestion';
+      }
+      if (otherSuggestions.length > 0) {
+        const otherSuggestion = otherSuggestions[0];
+        decoration.suggestion = true;
+        decoration.suggestionId = otherSuggestion.id;
+        decoration.suggestionType = otherSuggestion.suggestionType;
+        decoration.title = otherSuggestion.explanation || 'Click for suggestion';
+      }
+
+      decorations.push(decoration);
+    }
+
+    return decorations;
+  }, [suggestions, contentChangeTriggerRef.current, diffMode, calculateTextOffset, groupRangesByPosition, editor]);
 
   // Cleanup function for stale suggestions
   const cleanupStaleSuggestions = useCallback(async (suggestionIds: string[]) => {

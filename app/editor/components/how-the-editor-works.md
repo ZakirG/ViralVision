@@ -10,6 +10,8 @@ The editor uses a **Slate.js**-based rich text editor with custom suggestion hig
 2. **Grammar Check**: Uses write-good library (with OpenAI GPT-4o-mini as fallback)
 3. **Highlighting**: Custom Slate decorations for real-time visual feedback
 4. **Trigger System**: Event-based triggers with debouncing and idle detection
+5. **Content Change Tracking**: Smart system to prevent unnecessary highlighting recalculations
+6. **Multi-Type Support**: Words can be highlighted for both spelling and grammar suggestions simultaneously
 
 ### **Trigger Mechanisms**
 
@@ -94,7 +96,29 @@ export async function checkGrammarWithOpenAIAction(
 
 ### **Highlighting System**
 
-#### **Decoration System**
+#### **Content Change Tracking**
+```typescript
+// From editable-content.tsx lines 280-290
+// Track if content has actually changed (not just selection)
+const contentChangeTriggerRef = useRef(0)
+
+// Update filtered suggestions when props change or operations occur
+useEffect(() => {
+  filteredSuggestionsRef.current = propSuggestions.filter(s => 
+    s.startOffset != null && s.endOffset != null && s.startOffset < s.endOffset
+  )
+  
+  // Force decoration update when suggestions change
+  contentChangeTriggerRef.current += 1
+}, [propSuggestions])
+```
+
+**Key Innovation:**
+- **Content Change Trigger**: Prevents highlighting recalculation when users just click around
+- **Smart Dependencies**: Only recalculates when content actually changes, not on selection changes
+- **Performance Optimization**: Eliminates unnecessary re-renders during navigation
+
+#### **Enhanced Decoration System**
 ```typescript
 // From editable-content.tsx lines 750-950
 const decorate = useCallback(([node, path]: [Node, number[]]) => {
@@ -288,6 +312,9 @@ const acceptSuggestion = useCallback((suggestion: Suggestion) => {
   
   Transforms.select(editor, { anchor: startPos, focus: endPos })
   Transforms.insertText(editor, suggestion.suggestedText)
+  
+  // Increment content change trigger to force decoration update
+  contentChangeTriggerRef.current += 1
 }, [editor])
 ```
 
@@ -327,10 +354,13 @@ const decorate = useCallback(([node, path]: [Node, number[]]) => {
   // Get text directly from editor instead of using value dependency
   const fullText = slateToText(editor.children)
   
-  // Recalculate suggestion decorations only when content actually changes
-  // This prevents recalculation when users just click around
+  // Process suggestions and create Slate ranges
+  // ... decoration logic ...
+  
 }, [
+  // CRITICAL: Use stable suggestion dependency to prevent re-renders
   suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
+  // REMOVED: value - this was causing recalculation on every click
   contentChangeTriggerRef.current, // Only recalculate when content actually changes
   editor,
   baseline,
@@ -376,8 +406,12 @@ Decorations now only recalculate when:
 3. **Performance Focused**: Multiple optimizations for speed
 4. **User Experience**: Smooth interactions with hover effects and click handling
 5. **Scalable Architecture**: Modular design with clear separation of concerns
+6. **Click Performance**: No highlighting recalculation when users just click around
+7. **Content-Aware Updates**: Only recalculates when content actually changes
+8. **Multi-Type Support**: Words can be highlighted for both spelling and grammar simultaneously
+9. **Enhanced Visual Design**: Thick red underlines for spelling, yellow backgrounds for grammar
 
-The implementation is sophisticated and well-optimized for performance, though it could benefit from some simplification in the offset mapping logic and better error handling for edge cases.
+The implementation is sophisticated and well-optimized for performance, with recent improvements eliminating the performance issue of unnecessary highlighting recalculations during user navigation and enhancing the visual design to support multiple suggestion types on the same text.
 
 
 ## **Click Events and Side Effects in the WordWise Editor**
@@ -430,15 +464,20 @@ const handleChange = useCallback((newValue: Descendant[]) => {
 
 ### **2. Clicking on Suggestions**
 
-#### **Suggestion Click Handler**
+#### **Enhanced Click Handler**
 ```typescript
 // From editable-content.tsx lines 1120-1130
 const handleClick = useCallback((event: React.MouseEvent) => {
   const target = event.target as HTMLElement
+  const spellingSuggestionId = target.dataset.spellingSuggestionId
+  const grammarSuggestionId = target.dataset.grammarSuggestionId
   const suggestionId = target.dataset.suggestionId
   
-  if (suggestionId && onSuggestionClick) {
-    const suggestion = suggestions.find(s => s.id === suggestionId)
+  // Prioritize spelling suggestions, then grammar, then other types
+  const clickedSuggestionId = spellingSuggestionId || grammarSuggestionId || suggestionId
+  
+  if (clickedSuggestionId && onSuggestionClick) {
+    const suggestion = suggestions.find(s => s.id === clickedSuggestionId)
     if (suggestion) {
       event.preventDefault()
       event.stopPropagation()
@@ -452,6 +491,7 @@ const handleClick = useCallback((event: React.MouseEvent) => {
 - **Suggestion Panel Opens**: The right sidebar opens with suggestion details
 - **Event Prevention**: Prevents default browser behavior and stops event bubbling
 - **State Updates**: Sets `selectedSuggestionForPanel` and `suggestionPanelOpen` to true
+- **Priority System**: Spelling suggestions take priority over grammar suggestions
 
 #### **Suggestion Panel Display**
 ```typescript
@@ -654,4 +694,4 @@ if (currentSelection && lastSelection &&
 7. **UI Updates**: Toolbar and panels are updated
 8. **Side Effects**: Various async operations may be triggered
 
-The click handling system has been optimized to eliminate unnecessary highlighting recalculations when users simply click around in the document, significantly improving performance and user experience while maintaining all functionality.
+The click handling system has been optimized to eliminate unnecessary highlighting recalculations when users simply click around in the document, significantly improving performance and user experience while maintaining all functionality. The system now also supports multiple suggestion types on the same text with enhanced visual design.

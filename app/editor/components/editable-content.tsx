@@ -21,6 +21,9 @@ import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { updateSuggestionsAfterOperations } from "@/utils/pathAnchors"
 import { critiqueViralAbilityAction, type ViralCritique } from "@/actions/openai-critique-actions"
+import { makeDecorations, createUnifiedDiff } from "./diff-highlighter"
+import { cn } from "@/lib/utils"
+import RevisionBar from "./revision-bar"
 
 // Define custom types for Slate
 interface CustomElement {
@@ -37,6 +40,8 @@ interface CustomText {
   suggestionId?: string
   suggestionType?: "spelling" | "grammar" | string | null
   title?: string
+  added?: boolean
+  removed?: boolean
 }
 
 // Custom types for Slate editor
@@ -139,7 +144,17 @@ const Leaf = ({ attributes, children, leaf }: any) => {
     styledChildren = <u>{styledChildren}</u>
   }
 
-  return <span {...attributes}>{styledChildren}</span>
+  return (
+    <span
+      {...attributes}
+      className={cn(
+        leaf.added && 'bg-green-200',
+        leaf.removed && 'bg-red-200 line-through'
+      )}
+    >
+      {styledChildren}
+    </span>
+  )
 }
 
 // Convert HTML/rich text to Slate nodes
@@ -216,6 +231,23 @@ export const EditableContent = forwardRef<
   const [isViralCritiqueInProgress, setIsViralCritiqueInProgress] = useState(false)
   const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
   const [isReplacingContent, setIsReplacingContent] = useState(false)
+  
+  // Diff highlighting state
+  const [baseline, setBaseline] = useState<string>(() => {
+    // Initialize baseline with the plain text version of initial content
+    const initialNodes = htmlToSlate(initialContent)
+    return slateToText(initialNodes)
+  })
+  
+  // Diff mode state - only active after viral critique suggestions are applied
+  const [diffMode, setDiffMode] = useState(false)
+  
+  // New content state - stores the AI suggestion for Accept action
+  const [newContent, setNewContent] = useState<string>('')
+  
+  // Combined diff state - stores the unified diff text and decorations
+  const [combinedDiffText, setCombinedDiffText] = useState<string>('')
+  const [combinedDiffDecorations, setCombinedDiffDecorations] = useState<any[]>([])
 
   // Use suggestions from props, filtered for validity after operations
   const filteredSuggestionsRef = useRef<Suggestion[]>([])
@@ -707,9 +739,9 @@ export const EditableContent = forwardRef<
 
   // Create decorations for suggestions with cursor protection
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
-    const ranges: (Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string })[] = []
+    const ranges: (Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string } | Range & { added?: boolean; removed?: boolean })[] = []
     
-    if (!Text.isText(node) || !suggestions.length) {
+    if (!Text.isText(node)) {
       return ranges
     }
 
@@ -742,80 +774,159 @@ export const EditableContent = forwardRef<
       }
     }
 
-    // Track stale suggestion IDs for cleanup (but don't cleanup during active typing)
-    const staleSuggestionIds: string[] = []
-
-    suggestions.forEach((suggestion) => {
-      if (suggestion.startOffset == null || suggestion.endOffset == null) {
-        return
-      }
-
-      const suggestionStart = suggestion.startOffset
-      const suggestionEnd = suggestion.endOffset
+    // Add diff decorations if we're in diff mode and have combined diff decorations
+    const currentText = Node.string(editor)
+    console.log('🔍 DIFF DEBUG:', {
+      diffMode,
+      baseline,
+      newContent,
+      currentText,
+      combinedDiffText,
+      hasCombinedDecorations: combinedDiffDecorations.length > 0,
+      shouldShowDiff: diffMode && combinedDiffDecorations.length > 0
+    })
+    
+    if (diffMode && combinedDiffDecorations.length > 0) {
+      console.log('🎨 USING COMBINED DIFF DECORATIONS:', combinedDiffDecorations)
       
-      // ENHANCED SAFETY CHECK: Verify the suggestion offsets are still valid for current text
-      if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
-        staleSuggestionIds.push(suggestion.id)
-        return
+      // Use character offset approach like suggestion decorations
+      const fullText = slateToText(value)
+      
+      // Find the start offset of this text node in the full document
+      let textOffset = 0
+      for (const [n, p] of Node.nodes(editor)) {
+        if (path.length > 0 && p[0] < path[0]) {
+          if (Text.isText(n)) {
+            textOffset += n.text.length
+          }
+          // Add 1 for paragraph breaks (newlines)
+          if (p.length === 1) {
+            textOffset += 1
+          }
+        } else if (path.length > 1 && p[0] === path[0] && p[1] < path[1]) {
+          if (Text.isText(n)) {
+            textOffset += n.text.length
+          }
+        } else if (p.length === path.length && p.every((val, i) => val === path[i])) {
+          break
+        }
       }
-
-      // ENHANCED TEXT MISMATCH CHECK: verify the text at the offset still matches what we expect
-      const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
-      if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
-        staleSuggestionIds.push(suggestion.id)
-        return
-      }
-
-      // ADDITIONAL CHECK: Skip suggestions for incomplete words (common in spell checking)
-      if (suggestion.suggestionType === 'spelling' && suggestion.originalText) {
-        // Check if this appears to be a partial word by looking at surrounding characters
-        const beforeChar = suggestionStart > 0 ? fullText[suggestionStart - 1] : ' '
-        const afterChar = suggestionEnd < fullText.length ? fullText[suggestionEnd] : ' '
+      
+      // Apply combined diff decorations using character offsets
+      combinedDiffDecorations.forEach(decoration => {
+        // Check if this decoration overlaps with this text node
+        const nodeStart = textOffset
+        const nodeEnd = textOffset + nodeText.length
         
-        // If the word appears to be incomplete (no spaces around it), skip it
-        const isIncompleteWord = /[a-zA-Z]/.test(beforeChar) || /[a-zA-Z]/.test(afterChar)
-        if (isIncompleteWord && suggestion.originalText.length < 3) {
+        if (decoration.start < nodeEnd && decoration.end > nodeStart) {
+          // Calculate the range within this text node
+          const rangeStart = Math.max(0, decoration.start - nodeStart)
+          const rangeEnd = Math.min(nodeText.length, decoration.end - nodeStart)
+          
+          console.log('📍 APPLYING COMBINED DECORATION:', {
+            decoration,
+            path,
+            nodeText,
+            textOffset,
+            nodeStart,
+            nodeEnd,
+            rangeStart,
+            rangeEnd,
+            isValid: rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length
+          })
+          
+          if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
+            const newRange = {
+              anchor: { path, offset: rangeStart },
+              focus: { path, offset: rangeEnd },
+              ...(decoration.added && { added: true }),
+              ...(decoration.removed && { removed: true })
+            } as Range & { added?: boolean; removed?: boolean }
+            
+            console.log('✅ ADDING COMBINED RANGE:', newRange)
+            ranges.push(newRange)
+          }
+        }
+      })
+    }
+
+    // Add suggestion decorations
+    if (suggestions.length) {
+      // Track stale suggestion IDs for cleanup (but don't cleanup during active typing)
+      const staleSuggestionIds: string[] = []
+
+      suggestions.forEach((suggestion) => {
+        if (suggestion.startOffset == null || suggestion.endOffset == null) {
+          return
+        }
+
+        const suggestionStart = suggestion.startOffset
+        const suggestionEnd = suggestion.endOffset
+        
+        // ENHANCED SAFETY CHECK: Verify the suggestion offsets are still valid for current text
+        if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
           staleSuggestionIds.push(suggestion.id)
           return
         }
-      }
-      
-      // Check if this suggestion overlaps with this text node
-      const nodeStart = textOffset
-      const nodeEnd = textOffset + nodeText.length
-      
-      if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
-        // Calculate the range within this text node
-        const rangeStart = Math.max(0, suggestionStart - nodeStart)
-        const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
-        
-        if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
-          ranges.push({
-            anchor: { path, offset: rangeStart },
-            focus: { path, offset: rangeEnd },
-            suggestion: true,
-            suggestionId: suggestion.id,
-            suggestionType: suggestion.suggestionType,
-            title: suggestion.explanation || 'Click for suggestion'
-          })
-        }
-      }
-    })
 
-    // Only cleanup stale suggestions if user is not actively typing (to prevent cursor disruption)
-    if (staleSuggestionIds.length > 0) {
-      const now = Date.now()
-      const timeSinceLastChange = now - lastSpellCheckTimeRef.current
-      
-      // Wait at least 5 seconds after last typing before cleaning up to prevent continuous calls
-      if (timeSinceLastChange > 5000) {
-        // Use a ref to track if cleanup is already in progress
-        if (!cleanupInProgressRef.current) {
-          cleanupInProgressRef.current = true
-          setTimeout(() => {
-            debouncedCleanupStaleSuggestions(staleSuggestionIds)
-            cleanupInProgressRef.current = false
-          }, 1000) // 1 second delay to avoid interfering with typing
+        // ENHANCED TEXT MISMATCH CHECK: verify the text at the offset still matches what we expect
+        const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd)
+        if (suggestion.originalText && currentTextAtOffset !== suggestion.originalText) {
+          staleSuggestionIds.push(suggestion.id)
+          return
+        }
+
+        // ADDITIONAL CHECK: Skip suggestions for incomplete words (common in spell checking)
+        if (suggestion.suggestionType === 'spelling' && suggestion.originalText) {
+          // Check if this appears to be a partial word by looking at surrounding characters
+          const beforeChar = suggestionStart > 0 ? fullText[suggestionStart - 1] : ' '
+          const afterChar = suggestionEnd < fullText.length ? fullText[suggestionEnd] : ' '
+          
+          // If the word appears to be incomplete (no spaces around it), skip it
+          const isIncompleteWord = /[a-zA-Z]/.test(beforeChar) || /[a-zA-Z]/.test(afterChar)
+          if (isIncompleteWord && suggestion.originalText.length < 3) {
+            staleSuggestionIds.push(suggestion.id)
+            return
+          }
+        }
+        
+        // Check if this suggestion overlaps with this text node
+        const nodeStart = textOffset
+        const nodeEnd = textOffset + nodeText.length
+        
+        if (suggestionStart < nodeEnd && suggestionEnd > nodeStart) {
+          // Calculate the range within this text node
+          const rangeStart = Math.max(0, suggestionStart - nodeStart)
+          const rangeEnd = Math.min(nodeText.length, suggestionEnd - nodeStart)
+          
+          if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
+            ranges.push({
+              anchor: { path, offset: rangeStart },
+              focus: { path, offset: rangeEnd },
+              suggestion: true,
+              suggestionId: suggestion.id,
+              suggestionType: suggestion.suggestionType,
+              title: suggestion.explanation || 'Click for suggestion'
+            } as Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string })
+          }
+        }
+      })
+
+      // Only cleanup stale suggestions if user is not actively typing (to prevent cursor disruption)
+      if (staleSuggestionIds.length > 0) {
+        const now = Date.now()
+        const timeSinceLastChange = now - lastSpellCheckTimeRef.current
+        
+        // Wait at least 5 seconds after last typing before cleaning up to prevent continuous calls
+        if (timeSinceLastChange > 5000) {
+          // Use a ref to track if cleanup is already in progress
+          if (!cleanupInProgressRef.current) {
+            cleanupInProgressRef.current = true
+            setTimeout(() => {
+              debouncedCleanupStaleSuggestions(staleSuggestionIds)
+              cleanupInProgressRef.current = false
+            }, 1000) // 1 second delay to avoid interfering with typing
+          }
         }
       }
     }
@@ -825,8 +936,13 @@ export const EditableContent = forwardRef<
     // CRITICAL: Use stable suggestion dependency to prevent re-renders
     suggestions.map(s => `${s.id}:${s.startOffset}-${s.endOffset}`).join(','),
     value, 
-    editor
-  ]) // Removed lastSpellCheckTimeRef from dependencies to prevent continuous re-runs
+    editor,
+    baseline,
+    diffMode,
+    newContent,
+    combinedDiffText,
+    combinedDiffDecorations
+  ]) // Added newContent dependency for diff decorations
 
   // Cleanup function for stale suggestions
   const cleanupStaleSuggestions = useCallback(async (suggestionIds: string[]) => {
@@ -934,34 +1050,52 @@ export const EditableContent = forwardRef<
         ReactEditor.focus(editor)
       },
       replaceContent: (content: string) => {
+        console.log('🚀 REPLACE CONTENT CALLED:', {
+          content,
+          currentText: Node.string(editor)
+        })
+        
         // Set flags to prevent content reversion during viral critique update
         setIsViralCritiqueUpdating(true)
         setIsReplacingContent(true)
         
-        // Convert the new content to Slate nodes
-        const newNodes = htmlToSlate(content)
+        // Store the current text as baseline before applying the viral critique suggestion
+        const currentText = Node.string(editor)
+        console.log('📝 SETTING BASELINE:', currentText)
+        setBaseline(currentText)
         
-        // Use Slate's Transforms API to directly update the editor content
-        try {
-          // Clear the editor by removing all children
-          const rootChildren = Array.from(Node.children(editor, []))
-          for (let i = rootChildren.length - 1; i >= 0; i--) {
-            Transforms.removeNodes(editor, { at: [i] })
-          }
-          
-          // Insert the new content at the beginning
-          for (let i = 0; i < newNodes.length; i++) {
-            Transforms.insertNodes(editor, newNodes[i], { at: [i] })
-          }
-          
-        } catch (error) {
-          console.error("Error using Transforms:", error)
-          // Fallback to setValue if Transforms fails
-          setValue(newNodes)
+        // Enter diff mode
+        console.log('🎯 ENTERING DIFF MODE')
+        setDiffMode(true)
+        
+        // Store the new content for Accept action (but don't apply it yet)
+        const newContent = content
+        setNewContent(content)
+        
+        // Create unified diff that combines both old and new text
+        const { combinedText, decorations } = createUnifiedDiff(currentText, content)
+        console.log('🔄 UNIFIED DIFF:', {
+          combinedText,
+          decorations: decorations.length
+        })
+        
+        setCombinedDiffText(combinedText)
+        setCombinedDiffDecorations(decorations)
+        
+        // Apply the combined text to the editor
+        const newNodes = htmlToSlate(combinedText)
+        while (editor.children.length > 0) {
+          Transforms.removeNodes(editor, { at: [0] })
         }
+        newNodes.forEach((node, i) => {
+          Transforms.insertNodes(editor, node, { at: [i] })
+        })
+        
+        // Keep the original text in the editor - don't replace it
+        // The diff decorations will show what's been added/removed
         
         // Also trigger the onContentChange callback to update parent state
-        onContentChangeRef.current(content)
+        onContentChangeRef.current(currentText) // Keep original content for now
         
         // Focus the editor after a short delay to ensure the content has updated
         setTimeout(() => {
@@ -1140,6 +1274,42 @@ export const EditableContent = forwardRef<
           className="focus:outline-none"
         />
       </Slate>
+      
+      {diffMode && (
+        <RevisionBar
+          onAccept={() => {
+            console.log('✅ ACCEPT CLICKED - applying new content and exiting diff mode')
+            // Accept the changes - apply the new content and exit diff mode
+            const newNodes = htmlToSlate(newContent)
+            while (editor.children.length > 0) {
+              Transforms.removeNodes(editor, { at: [0] })
+            }
+            newNodes.forEach((node, i) => {
+              Transforms.insertNodes(editor, node, { at: [i] })
+            })
+            setBaseline(newContent) // Update baseline to the new content
+            setDiffMode(false)
+            setNewContent('') // Clear the new content
+            setCombinedDiffText('') // Clear combined diff text
+            setCombinedDiffDecorations([]) // Clear combined diff decorations
+          }}
+          onReject={() => {
+            console.log('❌ REJECT CLICKED - reverting to baseline and exiting diff mode')
+            // Reject the changes - revert to baseline and exit diff mode
+            const newNodes = htmlToSlate(baseline)
+            while (editor.children.length > 0) {
+              Transforms.removeNodes(editor, { at: [0] })
+            }
+            newNodes.forEach((node, i) => {
+              Transforms.insertNodes(editor, node, { at: [i] })
+            })
+            setDiffMode(false)
+            setNewContent('') // Clear the new content
+            setCombinedDiffText('') // Clear combined diff text
+            setCombinedDiffDecorations([]) // Clear combined diff decorations
+          }}
+        />
+      )}
       
       <style jsx>{`
         .slate-editor .suggestion-highlight:hover {

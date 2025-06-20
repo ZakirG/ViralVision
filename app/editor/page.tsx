@@ -137,6 +137,8 @@ export default function GrammarlyEditor() {
   const [applyingViralCritiqueKey, setApplyingViralCritiqueKey] = useState<string | null>(null)
   const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
   const [appliedViralCritiques, setAppliedViralCritiques] = useState<Set<string>>(new Set())
+  const [aiResponse, setAiResponse] = useState("")
+  const [isAiLoading, setIsAiLoading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -717,6 +719,71 @@ export default function GrammarlyEditor() {
       }, 1000) // 1 second delay to ensure content is fully inserted
     }
   }, [])
+
+  const handleAiMessageSend = useCallback(async () => {
+    if (!aiChatInput.trim() || isAiLoading) return
+
+    try {
+      setIsAiLoading(true)
+      setAiResponse("")
+
+      // Call OpenAI API
+      const response = await fetch('/api/openai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: aiChatInput,
+          systemPrompt: "You are ViralVision, an AI assistant that helps create viral video scripts. Write engaging, conversational scripts that are optimized for social media platforms like TikTok, Instagram Reels, and YouTube Shorts. Focus on creating hooks that grab attention, maintaining viewer engagement, and including calls to action."
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to get AI response')
+      }
+
+      const data = await response.json()
+      const aiGeneratedScript = data.response
+
+      // Set the AI response to display
+      setAiResponse(aiGeneratedScript)
+
+      // Append the AI response to the editor content
+      if (editorRef.current) {
+        const currentContent = documentContent
+        const newContent = currentContent + '\n\n' + aiGeneratedScript
+        editorRef.current.replaceContent(newContent)
+        
+        // Apply italic formatting to text wrapped in square brackets
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.applyItalicToBrackets()
+          }
+        }, 100)
+      }
+
+      // Clear the input
+      setAiChatInput("")
+
+      // Show success message
+      toast({
+        title: "Script Generated!",
+        description: "AI script has been added to your editor",
+        duration: 3000
+      })
+
+    } catch (error) {
+      console.error('Error calling OpenAI:', error)
+      toast({
+        title: "Error",
+        description: "Failed to generate script. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsAiLoading(false)
+    }
+  }, [aiChatInput, isAiLoading, documentContent])
 
   // Handle quick actions with AI rewriting
   const handleQuickAction = useCallback(async (actionType: keyof typeof QUICK_ACTION_PROMPTS) => {
@@ -1489,20 +1556,40 @@ export default function GrammarlyEditor() {
             )}
 
             {activeMainTab === "ai-write" && (
-              <div className="flex flex-1 flex-col">
+              <div className="flex flex-1 flex-col overflow-y-scroll">
                 {/* Chat messages area */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <div className="flex h-full items-center justify-center text-gray-500">
-                    <div className="max-w-full px-4 text-center">
-                      <Sparkles className="mx-auto mb-4 size-12 text-gray-300" />
-                      <h3 className="mb-2 font-medium text-gray-900">
-                        What video topic would you like ViralVision to write a script for?
-                      </h3>
-                      <p className="break-words text-sm text-gray-500">
-                        Describe your video idea and we'll generate a viral script for you
-                      </p>
+                  {aiResponse ? (
+                    <div className="space-y-4">
+                      <div className="rounded-lg bg-gray-100 p-3">
+                        <div className="text-sm font-medium text-gray-900 mb-2">Your request:</div>
+                        <div className="text-sm text-gray-700">{aiChatInput}</div>
+                      </div>
+                      <div className="rounded-lg bg-teal-50 p-3">
+                        <div className="text-sm font-medium text-teal-900 mb-2">AI Generated Script:</div>
+                        <div className="text-sm text-teal-800 whitespace-pre-wrap">{aiResponse}</div>
+                      </div>
                     </div>
-                  </div>
+                  ) : isAiLoading ? (
+                    <div className="flex h-full items-center justify-center text-gray-500">
+                      <div className="max-w-full px-4 text-center">
+                        <div className="animate-spin h-8 w-8 border border-teal-400 border-t-transparent rounded-full mx-auto mb-4"></div>
+                        <p className="text-sm text-gray-600">Generating your viral script...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-gray-500">
+                      <div className="max-w-full px-4 text-center">
+                        <Sparkles className="mx-auto mb-4 size-12 text-gray-300" />
+                        <h3 className="mb-2 font-medium text-gray-900">
+                          What video topic would you like ViralVision to write a script for?
+                        </h3>
+                        <p className="break-words text-sm text-gray-500">
+                          Describe your video idea and we'll generate a viral script for you
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Chat input area */}
@@ -1514,40 +1601,37 @@ export default function GrammarlyEditor() {
                       placeholder="What's your video about?"
                       className="min-w-0 flex-1 resize-none rounded-lg border border-gray-200 p-3 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500"
                       rows={3}
+                      disabled={isAiLoading}
                       onKeyDown={e => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault()
-                          if (aiChatInput.trim()) {
-                            // Handle send message here
-                            setAiChatInput("")
-                          }
+                          handleAiMessageSend()
                         }
                       }}
                     />
                     <Button
                       size="icon"
-                      disabled={!aiChatInput.trim()}
+                      disabled={!aiChatInput.trim() || isAiLoading}
                       className="shrink-0 self-end bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300"
-                      onClick={() => {
-                        if (aiChatInput.trim()) {
-                          // Handle send message here
-                          setAiChatInput("")
-                        }
-                      }}
+                      onClick={handleAiMessageSend}
                     >
-                      <svg
-                        className="size-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                        />
-                      </svg>
+                      {isAiLoading ? (
+                        <div className="animate-spin h-4 w-4 border border-white border-t-transparent rounded-full"></div>
+                      ) : (
+                        <svg
+                          className="size-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                          />
+                        </svg>
+                      )}
                     </Button>
                   </div>
                 </div>

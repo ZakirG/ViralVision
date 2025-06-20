@@ -62,7 +62,7 @@ import type { ViralCritique } from "@/actions/openai-critique-actions"
 
 // AI Quick Action Prompts
 const QUICK_ACTION_PROMPTS = {
-  shortenScript: `Rewrite this script to be under 30 seconds when spoken aloud. Keep the core message and key points, but make it much more concise and punchy. Focus on the most important information and remove any filler words or redundant phrases. The goal is to maintain impact while dramatically reducing length.`,
+  shortenScript: `Rewrite this script to be under 30 seconds when spoken aloud, which should be under about 9 sentences when spoken casually. Keep the core message and key points, but make it much more concise and punchy. Focus on the most important information and remove any filler words or redundant phrases. The goal is to maintain impact while dramatically reducing length.`,
   
   addViralHook: `Add a compelling viral hook at the beginning of this script. The hook should grab attention within the first 3 seconds and make viewers want to keep watching. Use techniques like:
 - Start with a surprising fact or statistic

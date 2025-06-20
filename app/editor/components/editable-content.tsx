@@ -310,10 +310,8 @@ export const EditableContent = forwardRef<
   
   // Diff highlighting state
   const [baseline, setBaseline] = useState<string>(() => {
-    // Initialize baseline with the plain text version of initial content
-    const initialNodes = htmlToSlate(initialContent)
-    const baselineText = slateToText(initialNodes)
-    return baselineText
+    // Initialize baseline with the HTML content to preserve formatting and structure
+    return initialContent
   })
   
   // Diff mode state - only active after viral critique suggestions are applied
@@ -1325,10 +1323,10 @@ export const EditableContent = forwardRef<
         setIsViralCritiqueUpdating(true)
         setIsReplacingContent(true)
         
-        // Store the current text as baseline before applying the viral critique suggestion
-        const currentText = Node.string(editor)
-        console.log('📝 SETTING BASELINE:', currentText)
-        setBaseline(currentText)
+        // Store the current HTML content as baseline before applying the viral critique suggestion
+        const currentHtml = slateToHtml(editor.children)
+        console.log('📝 SETTING BASELINE:', currentHtml)
+        setBaseline(currentHtml)
         
         // Enter diff mode
         setDiffMode(true)
@@ -1338,8 +1336,8 @@ export const EditableContent = forwardRef<
         setNewContent(content)
         
         // Create unified diff that combines both old and new text
+        const currentText = slateToText(editor.children)
         const { combinedText, decorations } = createUnifiedDiff(currentText, content)
-        
         
         setCombinedDiffText(combinedText)
         setCombinedDiffDecorations(decorations)
@@ -1360,7 +1358,7 @@ export const EditableContent = forwardRef<
         // The diff decorations will show what's been added/removed
         
         // Also trigger the onContentChange callback to update parent state
-        onContentChangeRef.current(currentText) // Keep original content for now
+        onContentChangeRef.current(currentHtml) // Keep original HTML content for now
         
         // Focus the editor after a short delay to ensure the content has updated
         setTimeout(() => {
@@ -1553,7 +1551,7 @@ export const EditableContent = forwardRef<
             newNodes.forEach((node, i) => {
               Transforms.insertNodes(editor, node, { at: [i] })
             })
-            setBaseline(newContent) // Update baseline to the new content
+            setBaseline(newContent) // Update baseline to the new HTML content
             setDiffMode(false)
             setNewContent('') // Clear the new content
             setCombinedDiffText('') // Clear combined diff text
@@ -1565,7 +1563,7 @@ export const EditableContent = forwardRef<
           onReject={() => {
             
             // Reject the changes - revert to baseline and exit diff mode
-            const newNodes = textToSlate(baseline)
+            const newNodes = htmlToSlate(baseline)
             
             
             while (editor.children.length > 0) {

@@ -249,7 +249,12 @@ export const EditableContent = forwardRef<
   const [baseline, setBaseline] = useState<string>(() => {
     // Initialize baseline with the plain text version of initial content
     const initialNodes = htmlToSlate(initialContent)
-    return slateToText(initialNodes)
+    const baselineText = slateToText(initialNodes)
+    console.log('🔍 DEBUG: Initial content:', JSON.stringify(initialContent))
+    console.log('🔍 DEBUG: Initial nodes:', initialNodes)
+    console.log('🔍 DEBUG: Baseline text:', JSON.stringify(baselineText))
+    console.log('🔍 DEBUG: Baseline contains newlines:', baselineText.includes('\n'))
+    return baselineText
   })
   
   // Diff mode state - only active after viral critique suggestions are applied
@@ -789,19 +794,8 @@ export const EditableContent = forwardRef<
 
     // Add diff decorations if we're in diff mode and have combined diff decorations
     const currentText = Node.string(editor)
-    console.log('🔍 DIFF DEBUG:', {
-      diffMode,
-      baseline,
-      newContent,
-      currentText,
-      combinedDiffText,
-      hasCombinedDecorations: combinedDiffDecorations.length > 0,
-      shouldShowDiff: diffMode && combinedDiffDecorations.length > 0
-    })
     
     if (diffMode && combinedDiffDecorations.length > 0) {
-      console.log('🎨 USING COMBINED DIFF DECORATIONS:', combinedDiffDecorations)
-      
       // Use character offset approach like suggestion decorations
       const fullText = slateToText(value)
       
@@ -836,18 +830,6 @@ export const EditableContent = forwardRef<
           const rangeStart = Math.max(0, decoration.start - nodeStart)
           const rangeEnd = Math.min(nodeText.length, decoration.end - nodeStart)
           
-          console.log('📍 APPLYING COMBINED DECORATION:', {
-            decoration,
-            path,
-            nodeText,
-            textOffset,
-            nodeStart,
-            nodeEnd,
-            rangeStart,
-            rangeEnd,
-            isValid: rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length
-          })
-          
           if (rangeStart < rangeEnd && rangeStart >= 0 && rangeEnd <= nodeText.length) {
             const newRange = {
               anchor: { path, offset: rangeStart },
@@ -856,7 +838,6 @@ export const EditableContent = forwardRef<
               ...(decoration.removed && { removed: true })
             } as Range & { added?: boolean; removed?: boolean }
             
-            console.log('✅ ADDING COMBINED RANGE:', newRange)
             ranges.push(newRange)
           }
         }
@@ -1308,14 +1289,23 @@ export const EditableContent = forwardRef<
           }}
           onReject={() => {
             console.log('❌ REJECT CLICKED - reverting to baseline and exiting diff mode')
+            console.log('🔍 DEBUG: Baseline text:', JSON.stringify(baseline))
+            console.log('🔍 DEBUG: Baseline text length:', baseline.length)
+            console.log('🔍 DEBUG: Baseline contains newlines:', baseline.includes('\n'))
+            
             // Reject the changes - revert to baseline and exit diff mode
             const newNodes = textToSlate(baseline)
+            console.log('🔍 DEBUG: Converted to nodes:', newNodes)
+            
             while (editor.children.length > 0) {
               Transforms.removeNodes(editor, { at: [0] })
             }
             newNodes.forEach((node, i) => {
               Transforms.insertNodes(editor, node, { at: [i] })
             })
+            
+            console.log('🔍 DEBUG: Final editor content:', slateToText(editor.children))
+            
             setDiffMode(false)
             setNewContent('') // Clear the new content
             setCombinedDiffText('') // Clear combined diff text

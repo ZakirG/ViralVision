@@ -20,7 +20,7 @@ import {
   X
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useUser, UserButton } from "@clerk/nextjs"
+import { useUser, UserButton, useClerk } from "@clerk/nextjs"
 import {
   getDocumentsByUserIdAction,
   deleteDocumentAction
@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const { isSignedIn, user, isLoaded } = useUser()
+  const { openUserProfile } = useClerk()
 
   // Load documents when user is signed in
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function Dashboard() {
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to load documents",
+        description: "Failed to load video plans",
         variant: "destructive"
       })
     } finally {
@@ -77,7 +78,7 @@ export default function Dashboard() {
 
   const handleDocumentCreated = async (documentId: string) => {
     try {
-      console.log("🚀 Navigating to editor for document:", documentId)
+      console.log("🚀 Navigating to editor for video plan:", documentId)
       
       // Refresh the documents list before navigation to ensure it's up to date
       // This ensures the new document appears in the list if the user navigates back
@@ -89,8 +90,8 @@ export default function Dashboard() {
     } catch (error) {
       console.error("❌ Error during post-creation navigation:", error)
       toast({
-        title: "Document Created",
-        description: "Document was created successfully, but navigation failed. Please find it in your documents list.",
+        title: "Video Plan Created",
+        description: "Video plan was created successfully, but navigation failed. Please find it in your video plans list.",
         variant: "default"
       })
     }
@@ -104,7 +105,7 @@ export default function Dashboard() {
       if (result.isSuccess) {
         toast({
           title: "Success",
-          description: "Document deleted successfully"
+          description: "Video plan deleted successfully"
         })
         loadDocuments() // Reload documents
       } else {
@@ -117,7 +118,7 @@ export default function Dashboard() {
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to delete document",
+        description: "Failed to delete video plan",
         variant: "destructive"
       })
     }
@@ -125,6 +126,11 @@ export default function Dashboard() {
 
   const handleDocumentClick = (docId: string) => {
     router.push(`/editor?doc=${docId}`)
+  }
+
+  const handleAccountClick = () => {
+    // Open the user profile modal using Clerk's built-in method
+    openUserProfile()
   }
 
   // Show loading state while Clerk is loading
@@ -168,9 +174,6 @@ export default function Dashboard() {
             <span className="text-sm font-bold text-white">W</span>
           </div>
           <span className="font-semibold text-gray-900">WordWise</span>
-          <Badge variant="secondary" className="ml-auto text-xs">
-            Free
-          </Badge>
         </div>
 
         {/* Navigation */}
@@ -180,33 +183,15 @@ export default function Dashboard() {
             className="w-full justify-start gap-3 bg-gray-100"
           >
             <div className="size-4 rounded bg-gray-400"></div>
-            Documents
+            Video Plans
           </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3">
-            <History className="size-4" />
-            Version history
-          </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3">
-            <Trash2 className="size-4" />
-            Trash
-          </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3">
+          <Button 
+            variant="ghost" 
+            className="w-full justify-start gap-3"
+            onClick={handleAccountClick}
+          >
             <User className="size-4" />
             Account
-          </Button>
-          <Button
-            variant="ghost"
-            className="relative w-full justify-start gap-3"
-          >
-            <Grid3X3 className="size-4" />
-            Apps
-            <Badge className="absolute -right-1 -top-1 size-5 bg-teal-600 text-xs">
-              4
-            </Badge>
-          </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3">
-            <Star className="size-4" />
-            Get Pro
           </Button>
         </nav>
 
@@ -243,7 +228,7 @@ export default function Dashboard() {
         {/* Main header */}
         <div className="border-b border-gray-200 bg-white p-6">
           <h1 className="mb-6 text-2xl font-semibold text-gray-900">
-            Documents
+            Video Plans
           </h1>
 
           {/* Action buttons */}
@@ -274,13 +259,13 @@ export default function Dashboard() {
                 <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-teal-600">
                   <span className="text-sm font-bold text-white">W</span>
                 </div>
-                <p className="text-gray-600">Loading documents...</p>
+                <p className="text-gray-600">Loading video plans...</p>
               </div>
             </div>
           ) : documents.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <p className="mb-4 text-gray-600">No documents yet</p>
+                <p className="mb-4 text-gray-600">No video plans yet</p>
                 <NewDocumentModal onDocumentCreated={handleDocumentCreated} />
               </div>
             </div>
@@ -289,7 +274,7 @@ export default function Dashboard() {
               {documents.map(doc => (
                 <Card
                   key={doc.id}
-                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  className="cursor-pointer transition-shadow hover:shadow-md flex flex-col"
                   onClick={() => handleDocumentClick(doc.id)}
                 >
                   <CardHeader className="pb-3">
@@ -300,8 +285,8 @@ export default function Dashboard() {
                       {doc.title}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="mb-4 line-clamp-3 text-sm text-gray-600">
+                  <CardContent className="pt-0 flex-1 flex flex-col">
+                    <p className="mb-4 line-clamp-3 text-sm text-gray-600 flex-1">
                       {(() => {
                         if (!doc.rawText) return "No content yet"
                         const cleanText = htmlToPreviewText(doc.rawText)
@@ -312,35 +297,18 @@ export default function Dashboard() {
                     </p>
 
                     {/* Footer with actions */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {doc.status}
-                        </Badge>
-                        {doc.contentType && (
-                          <Badge variant="secondary" className="text-xs">
-                            {doc.contentType}
-                          </Badge>
-                        )}
-                        {doc.audienceLevel && (
-                          <Badge variant="secondary" className="text-xs">
-                            {doc.audienceLevel}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <Download className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          onClick={e => handleDeleteDocument(doc.id, e)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
+                    <div className="flex items-center justify-end gap-2 mt-auto">
+                      <Button variant="ghost" size="icon" className="size-8">
+                        <Download className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        onClick={e => handleDeleteDocument(doc.id, e)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>

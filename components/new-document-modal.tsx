@@ -53,14 +53,14 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
   const createDocumentWithRetry = useCallback(async (documentData: any, maxRetries = 2): Promise<any> => {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`📝 Creating document (attempt ${attempt + 1}/${maxRetries + 1}):`, documentData)
+        console.log(`📝 Creating video plan (attempt ${attempt + 1}/${maxRetries + 1}):`, documentData)
         const result = await createDocumentAction(documentData)
         
         if (result.isSuccess) {
-          console.log("✅ Document created successfully on attempt", attempt + 1)
+          console.log("✅ Video plan created successfully on attempt", attempt + 1)
           return result
         } else {
-          console.log(`❌ Document creation failed on attempt ${attempt + 1}:`, result.message)
+          console.log(`❌ Video plan creation failed on attempt ${attempt + 1}:`, result.message)
           
           // If this is the last attempt, throw the error
           if (attempt === maxRetries) {
@@ -69,7 +69,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
           
           // For retry-able errors, wait briefly before retrying
           if (result.message?.includes("timeout") || result.message?.includes("connection")) {
-            console.log(`⏳ Retrying document creation in 1 second...`)
+            console.log(`⏳ Retrying video plan creation in 1 second...`)
             await new Promise(resolve => setTimeout(resolve, 1000))
           } else {
             // For non-retryable errors, don't retry
@@ -77,7 +77,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
           }
         }
       } catch (error) {
-        console.error(`❌ Document creation error on attempt ${attempt + 1}:`, error)
+        console.error(`❌ Video plan creation error on attempt ${attempt + 1}:`, error)
         
         // If this is the last attempt, throw the error
         if (attempt === maxRetries) {
@@ -85,7 +85,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
         }
         
         // Wait briefly before retrying
-        console.log(`⏳ Retrying document creation in 1 second...`)
+        console.log(`⏳ Retrying video plan creation in 1 second...`)
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
     }
@@ -96,14 +96,14 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
     
     // Prevent double submission
     if (loading) {
-      console.log("🚫 Document creation already in progress, ignoring duplicate submission")
+      console.log("🚫 Video plan creation already in progress, ignoring duplicate submission")
       return
     }
     
     if (!title.trim()) {
       toast({
         title: "Error",
-        description: "Please enter a document title",
+        description: "Please enter a video plan title",
         variant: "destructive"
       })
       return
@@ -123,7 +123,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
       const result = await createDocumentWithRetry(documentData)
 
       if (result.isSuccess && result.data) {
-        console.log("✅ Document created successfully:", result.data.id)
+        console.log("✅ Video plan created successfully:", result.data.id)
         
         // Reset form state immediately after successful creation
         setTitle("")
@@ -134,7 +134,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
         // Show success message
         toast({
           title: "Success",
-          description: "Document created successfully"
+          description: "Video plan created successfully"
         })
         
         // Close modal before navigation to improve UX
@@ -150,22 +150,22 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
           contentType,
           audienceLevel
         ).catch((error) => {
-          console.error("📊 Failed to log document created event (non-blocking):", error)
+          console.error("📊 Failed to log video plan created event (non-blocking):", error)
         })
         
       } else {
-        console.error("❌ Document creation failed after retries:", result.message)
+        console.error("❌ Video plan creation failed after retries:", result.message)
         toast({
           title: "Error",
-          description: result.message || "Failed to create document. Please try again.",
+          description: result.message || "Failed to create video plan. Please try again.",
           variant: "destructive"
         })
       }
     } catch (error) {
-      console.error("❌ Document creation error after retries:", error)
+      console.error("❌ Video plan creation error after retries:", error)
       toast({
         title: "Error",
-        description: "Failed to create document. Please try again.",
+        description: "Failed to create video plan. Please try again.",
         variant: "destructive"
       })
     } finally {
@@ -178,22 +178,22 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
       <DialogTrigger asChild>
         <Button className="gap-2 bg-teal-600 hover:bg-teal-700">
           <Plus className="size-4" />
-          New document
+          New video plan
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create New Document</DialogTitle>
+          <DialogTitle>Create New Video Plan</DialogTitle>
           <DialogDescription>
-            Set up your document with content type and target audience.
+            Set up your video plan with content type and target audience.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="title">Document Title</Label>
+            <Label htmlFor="title">Video Plan Title</Label>
             <Input
               id="title"
-              placeholder="Enter document title..."
+              placeholder="Enter video plan title..."
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
@@ -252,7 +252,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
               disabled={loading}
               className="bg-teal-600 hover:bg-teal-700"
             >
-              {loading ? "Creating..." : "Create Document"}
+              {loading ? "Creating..." : "Create Video Plan"}
             </Button>
           </div>
         </form>

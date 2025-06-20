@@ -78,6 +78,60 @@ body {
   .bg-gradient-primary-to-transparent {
     background: linear-gradient(135deg, hsl(var(--primary-brand)) 0%, transparent 100%);
   }
+  
+  /* Suggestion highlighting styles */
+  .suggestion-highlight {
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  /* Spelling suggestion styles - thick red underline */
+  .suggestion-highlight[data-spelling-suggestion-id] {
+    border-bottom: 3px solid #dc2626;
+    border-bottom-style: solid;
+    border-bottom-width: 3px;
+    border-bottom-color: #dc2626;
+  }
+  
+  .suggestion-highlight[data-spelling-suggestion-id]:hover {
+    border-bottom-color: #b91c1c;
+  }
+  
+  /* Grammar suggestion styles - yellow background */
+  .suggestion-highlight[data-grammar-suggestion-id] {
+    background-color: rgba(255, 255, 0, 0.3);
+    border-radius: 2px;
+    padding: 1px 2px;
+  }
+  
+  .suggestion-highlight[data-grammar-suggestion-id]:hover {
+    background-color: rgba(255, 255, 0, 0.5);
+  }
+  
+  /* Combined spelling and grammar suggestions */
+  .suggestion-highlight[data-spelling-suggestion-id][data-grammar-suggestion-id] {
+    background-color: rgba(255, 255, 0, 0.3);
+    border-radius: 2px;
+    padding: 1px 2px;
+    border-bottom: 3px solid #dc2626;
+  }
+  
+  .suggestion-highlight[data-spelling-suggestion-id][data-grammar-suggestion-id]:hover {
+    background-color: rgba(255, 255, 0, 0.5);
+    border-bottom-color: #b91c1c;
+  }
+  
+  /* Other suggestion types - pink background */
+  .suggestion-highlight[data-suggestion-id]:not([data-spelling-suggestion-id]):not([data-grammar-suggestion-id]) {
+    background-color: #fce7f3;
+    border-radius: 2px;
+    padding: 1px 2px;
+  }
+  
+  .suggestion-highlight[data-suggestion-id]:not([data-spelling-suggestion-id]):not([data-grammar-suggestion-id]):hover {
+    background-color: #fbb6ce;
+  }
 }
 
 @layer base {

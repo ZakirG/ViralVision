@@ -295,7 +295,7 @@ export const EditableContent = forwardRef<
   useEffect(() => {
     stableDebouncedWordCompleteSpellCheckRef.current = stableDebouncedWordCompleteSpellCheck
     sentenceCompleteGrammarCheckRef.current = sentenceCompleteGrammarCheck
-    debouncedViralCritiqueCheckRef.current = debouncedViralCritiqueCheck
+    // Note: viral critique ref is set immediately after function creation
   })
 
   // Handle initialContent changes (e.g., when suggestion is accepted) - STABLE VERSION
@@ -474,6 +474,9 @@ export const EditableContent = forwardRef<
     }, WORD_COMPLETION_DELAY), // Use same delay as spell check (800ms)
     [isViralCritiqueInProgress, onViralCritiqueUpdate]
   )
+
+  // Set the ref immediately when the function is created
+  debouncedViralCritiqueCheckRef.current = debouncedViralCritiqueCheck
 
   // Detect if user just completed a word (typed space after letters)
   const isWordBoundary = useCallback((currentText: string, previousText: string): boolean => {
@@ -1074,23 +1077,30 @@ export const EditableContent = forwardRef<
     // Mark that we've run initial checks for this document
     initialChecksRunRef.current.add(documentId)
     
-    // Add a small delay to ensure editor is fully initialized
-    const timer = setTimeout(() => {
-      const plainText = slateToText(htmlToSlate(initialContent))
-      
-      if (plainText.trim()) {
-        stableDebouncedWordCompleteSpellCheckRef.current?.(plainText, documentId)
-        
-        sentenceCompleteGrammarCheckRef.current?.(plainText, documentId, 'initial-load')
-        
-        // Run viral critique at the same time as spell check (same timing)
-        debouncedViralCritiqueCheckRef.current?.(plainText)
+    // Run checks immediately without setTimeout
+    const plainText = slateToText(htmlToSlate(initialContent))
+    
+    if (plainText.trim()) {
+      // Check if spell check function is available
+      if (stableDebouncedWordCompleteSpellCheckRef.current) {
+        stableDebouncedWordCompleteSpellCheckRef.current(plainText, documentId)
       }
       
-    }, 500) // 500ms delay to ensure editor is ready
+      // Check if grammar check function is available
+      if (sentenceCompleteGrammarCheckRef.current) {
+        sentenceCompleteGrammarCheckRef.current(plainText, documentId, 'initial-load')
+      }
+      
+      // Run viral critique immediately
+      if (debouncedViralCritiqueCheckRef.current) {
+        debouncedViralCritiqueCheckRef.current(plainText)
+      } else {
+        // Fallback: call the function directly if ref is not available
+        debouncedViralCritiqueCheck(plainText)
+      }
+    }
     
-    return () => clearTimeout(timer)
-  }, [documentId, initialContent]) // Only depend on documentId and initialContent, not callback functions
+  }, [documentId, initialContent]) // Remove debouncedViralCritiqueCheck dependency since ref is set immediately
 
   // Update format state when selection changes
   useEffect(() => {

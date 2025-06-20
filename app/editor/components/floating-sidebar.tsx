@@ -68,7 +68,7 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
             onClick={handleMyViralVision}
           >
             <Home className="size-4" />
-            My ViralVision
+            My video plans
           </Button>
         </div>
 
@@ -119,14 +119,6 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
                 Print
               </div>
               <span className="text-xs text-gray-500">⌘+P</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <History className="size-4" />
-              Version history
             </Button>
           </div>
         </div>
@@ -208,38 +200,6 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
         </div>
 
         <Separator className="mx-4" />
-
-        {/* Tools Section */}
-        <div className="px-4 py-3">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-            Tools
-          </div>
-          <div className="space-y-0.5">
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <Settings className="size-4" />
-              Settings
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <Diamond className="size-4" />
-              Premium features
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <Flag className="size-4" />
-              Report issue
-            </Button>
-          </div>
-        </div>
 
         {/* Footer */}
         <div className="mt-auto border-t border-gray-200 p-4">

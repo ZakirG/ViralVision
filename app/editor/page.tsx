@@ -923,14 +923,15 @@ export default function GrammarlyEditor() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => router.push("/dashboard")}
-                className="flex size-6 cursor-pointer items-center justify-center rounded-full bg-teal-600 transition-colors hover:bg-teal-700"
+                className="flex size-6 cursor-pointer items-center justify-center rounded-full bg-primary-brand transition-colors hover:bg-primary-brand-hover"
               >
-                <span className="text-xs font-bold text-white">W</span>
+                <span className="text-xs font-bold text-white">V</span>
               </button>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(true)}
+                className="hidden"
               >
                 <Menu className="size-4" />
               </Button>
@@ -970,28 +971,10 @@ export default function GrammarlyEditor() {
               variant="outline"
               size="sm"
               className="gap-2"
-              onClick={() => setGoalsModalOpen(true)}
-            >
-              <Settings className="size-4" />
-              Content Goals
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
               onClick={() => setTiktokModalOpen(true)}
             >
               <Video className="size-4" />
               Import script from TikTok
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => setPerformanceModalOpen(true)}
-            >
-              <BarChart3 className="size-4" />
-              Overall score
             </Button>
           </div>
 
@@ -1088,12 +1071,14 @@ export default function GrammarlyEditor() {
                     className="gap-2 text-sm text-gray-500 hover:text-gray-700"
                   >
                     <span>
-                      {
-                        documentContent
-                          .split(/\s+/)
-                          .filter(word => word.length > 0).length
-                      }{" "}
-                      words
+                      ~{Math.max(
+                        1,
+                        Math.ceil(
+                          documentContent
+                            .split(/\s+/)
+                            .filter(word => word.length > 0).length * 0.3
+                        )
+                      )} sec speaking time
                     </span>
                     <ChevronDown className="size-4 text-gray-400" />
                   </Button>
@@ -1121,31 +1106,10 @@ export default function GrammarlyEditor() {
                         Math.ceil(
                           documentContent
                             .split(/\s+/)
-                            .filter(word => word.length > 0).length / 200
-                        )
-                      )}{" "}
-                      sec reading time
-                    </div>
-
-                    <div className="text-sm text-gray-700">
-                      {Math.max(
-                        1,
-                        Math.ceil(
-                          documentContent
-                            .split(/\s+/)
-                            .filter(word => word.length > 0).length / 150
+                            .filter(word => word.length > 0).length * 0.3
                         )
                       )}{" "}
                       sec speaking time
-                    </div>
-
-                    <div className="text-sm text-gray-700">
-                      Readability score —{" "}
-                      {documentContent
-                        .split(/\s+/)
-                        .filter(word => word.length > 0).length < 10
-                        ? "not enough text"
-                        : "good"}
                     </div>
                   </div>
                 </PopoverContent>
@@ -1164,14 +1128,14 @@ export default function GrammarlyEditor() {
       >
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          className="size-12 rounded-full border-2 border-gray-400 bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
+          className="size-8 rounded-[4px] border bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
         >
           {rightPanelCollapsed ? (
-            <ChevronLeft className="size-8 text-gray-700" />
+            <ChevronLeft className="size-6 text-gray-700" />
           ) : (
-            <ChevronRight className="size-8 text-gray-700" />
+            <ChevronRight className="size-6 text-gray-700" />
           )}
         </Button>
       </div>
@@ -1459,37 +1423,11 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => handleQuickAction('shortenScript')}
-                      disabled={applyingViralCritiqueKey !== null}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">
-                          Shorten script to under 30 seconds
-                        </span>
-                      </div>
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-auto w-full justify-start px-4 py-3 text-left"
                       onClick={() => handleQuickAction('addViralHook')}
                       disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">Add a viral hook</span>
-                      </div>
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => handleQuickAction('rewriteConversational')}
-                      disabled={applyingViralCritiqueKey !== null}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">
-                          Rewrite to be more conversational
-                        </span>
                       </div>
                     </Button>
 
@@ -1506,6 +1444,20 @@ export default function GrammarlyEditor() {
                       </div>
                     </Button>
 
+
+                    <Button
+                      variant="outline"
+                      className="h-auto w-full justify-start px-4 py-3 text-left"
+                      onClick={() => handleQuickAction('shortenScript')}
+                      disabled={applyingViralCritiqueKey !== null}
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">
+                          Shorten script to under 30 seconds
+                        </span>
+                      </div>
+                    </Button>
+
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
@@ -1515,6 +1467,19 @@ export default function GrammarlyEditor() {
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
                           Add tips for verbal delivery
+                        </span>
+                      </div>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="h-auto w-full justify-start px-4 py-3 text-left"
+                      onClick={() => handleQuickAction('rewriteConversational')}
+                      disabled={applyingViralCritiqueKey !== null}
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">
+                          Rewrite to be more conversational
                         </span>
                       </div>
                     </Button>
@@ -1531,11 +1496,10 @@ export default function GrammarlyEditor() {
                     <div className="max-w-full px-4 text-center">
                       <Sparkles className="mx-auto mb-4 size-12 text-gray-300" />
                       <h3 className="mb-2 font-medium text-gray-900">
-                        What do you want to do?
+                        What video topic would you like ViralVision to write a script for?
                       </h3>
                       <p className="break-words text-sm text-gray-500">
-                        Start a conversation to get AI assistance with your
-                        writing
+                        Describe your video idea and we'll generate a viral script for you
                       </p>
                     </div>
                   </div>
@@ -1547,7 +1511,7 @@ export default function GrammarlyEditor() {
                     <textarea
                       value={aiChatInput}
                       onChange={e => setAiChatInput(e.target.value)}
-                      placeholder="Ask for any revision"
+                      placeholder="What's your video about?"
                       className="min-w-0 flex-1 resize-none rounded-lg border border-gray-200 p-3 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500"
                       rows={3}
                       onKeyDown={e => {

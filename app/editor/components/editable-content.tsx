@@ -176,6 +176,19 @@ const htmlToSlate = (html: string): Descendant[] => {
   }))
 }
 
+// Convert plain text to Slate nodes (preserving newlines)
+const textToSlate = (text: string): Descendant[] => {
+  if (!text.trim()) {
+    return [{ type: 'paragraph', children: [{ text: '' }] }]
+  }
+
+  const lines = text.split('\n')
+  return lines.map(line => ({
+    type: 'paragraph',
+    children: [{ text: line }]
+  }))
+}
+
 // Test the round-trip conversion:
 // Input: "Line 1<br>Line 2<br>Line 3"
 // htmlToSlate: converts <br> to \n, then splits by \n → ["Line 1", "Line 2", "Line 3"]
@@ -1296,7 +1309,7 @@ export const EditableContent = forwardRef<
           onReject={() => {
             console.log('❌ REJECT CLICKED - reverting to baseline and exiting diff mode')
             // Reject the changes - revert to baseline and exit diff mode
-            const newNodes = htmlToSlate(baseline)
+            const newNodes = textToSlate(baseline)
             while (editor.children.length > 0) {
               Transforms.removeNodes(editor, { at: [0] })
             }

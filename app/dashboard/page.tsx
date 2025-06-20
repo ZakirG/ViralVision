@@ -138,8 +138,8 @@ export default function Dashboard() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 items-center justify-center rounded-full bg-teal-600">
-            <span className="text-sm font-bold text-white">W</span>
+          <div className="mx-auto mb-4 flex size-8 items-center justify-center rounded-full bg-primary-brand">
+            <span className="text-sm font-bold text-white">V</span>
           </div>
           <p className="text-gray-600">Loading...</p>
         </div>
@@ -170,10 +170,10 @@ export default function Dashboard() {
       >
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-gray-200 p-4">
-          <div className="flex size-8 items-center justify-center rounded-full bg-teal-600">
-            <span className="text-sm font-bold text-white">W</span>
+          <div className="flex size-8 items-center justify-center rounded-full bg-primary-brand">
+            <span className="text-sm font-bold text-white">V</span>
           </div>
-          <span className="font-semibold text-gray-900">WordWise</span>
+          <span className="font-semibold text-gray-900">ViralVision</span>
         </div>
 
         {/* Navigation */}
@@ -256,8 +256,8 @@ export default function Dashboard() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-teal-600">
-                  <span className="text-sm font-bold text-white">W</span>
+                <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-primary-brand">
+                  <span className="text-sm font-bold text-white">V</span>
                 </div>
                 <p className="text-gray-600">Loading video plans...</p>
               </div>

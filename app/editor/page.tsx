@@ -862,8 +862,8 @@ export default function GrammarlyEditor() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-teal-600">
-            <span className="text-sm font-bold text-white">W</span>
+          <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-primary-brand">
+            <span className="text-sm font-bold text-white">V</span>
           </div>
           <p className="text-gray-600">Loading document...</p>
         </div>

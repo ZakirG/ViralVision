@@ -116,7 +116,7 @@ async function callOpenRouter(sentence: string): Promise<GrammarSuggestion[]> {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "WordWise Grammar Checker"
+        "X-Title": "ViralVision Grammar Checker"
       },
       body: JSON.stringify({
         model: "openai/gpt-4.1-mini",

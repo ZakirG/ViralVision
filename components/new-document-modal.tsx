@@ -176,7 +176,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2 bg-teal-600 hover:bg-teal-700">
+        <Button className="gap-2 bg-primary-brand hover:bg-primary-brand-hover">
           <Plus className="size-4" />
           New video plan
         </Button>
@@ -250,7 +250,7 @@ export function NewDocumentModal({ onDocumentCreated }: NewDocumentModalProps) {
             <Button
               type="submit"
               disabled={loading}
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-primary-brand hover:bg-primary-brand-hover"
             >
               {loading ? "Creating..." : "Create Video Plan"}
             </Button>

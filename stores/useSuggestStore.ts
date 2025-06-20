@@ -12,7 +12,7 @@ function generateDictionaryHash(): string {
 // Get localStorage key for dismissed suggestions
 function getDismissedStorageKey(): string {
   const dictHash = generateDictionaryHash()
-  return `wordwise_dismissed_${dictHash}`
+  return `viralvision_dismissed_${dictHash}`
 }
 
 // Load dismissed suggestion IDs from localStorage

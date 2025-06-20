@@ -25,8 +25,8 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "WordWise",
-  description: "A smart writing assistant built with Next.js"
+  title: "ViralVision",
+  description: "Create viral video scripts with AI",
 }
 
 // Development-only component to handle auth after hot reloads

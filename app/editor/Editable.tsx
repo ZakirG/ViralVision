@@ -668,7 +668,7 @@ const EditableComponent = forwardRef<EditableHandle, EditableProps>((props, ref)
           onBlur={() => {
             console.log("📝 Editor blurred")
             setIsFocused(false)
-            cancelCheck() // Cancel any pending grammar check when losing focus
+            // cancelCheck() // Cancel any pending grammar check when losing focus
           }}
           onKeyDown={(event) => {
             // Prevent operations during suggestion acceptance

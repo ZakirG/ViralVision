@@ -45,6 +45,10 @@ interface UseIdleSpellGrammarCheckReturn {
   isChecking: boolean
   /** Current revision number */
   revision: number
+  /** Schedule idle spell check */
+  scheduleIdleSpellCheck: () => void
+  /** Schedule idle grammar check */
+  scheduleIdleGrammarCheck: () => void
 }
 
 export function useIdleGrammarCheck({
@@ -55,6 +59,8 @@ export function useIdleGrammarCheck({
   idleTimeout = 1000
 }: UseIdleSpellGrammarCheckOptions): UseIdleSpellGrammarCheckReturn {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const spellIdleTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const grammarIdleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isCheckingRef = useRef(false)
   const currentCheckTypeRef = useRef<'spell' | 'grammar' | 'combined' | null>(null)
@@ -66,10 +72,18 @@ export function useIdleGrammarCheck({
   const cancelCheck = useCallback((checkType?: 'spell' | 'grammar' | 'combined') => {
     // If no type specified, cancel everything
     if (!checkType) {
-      // Cancel idle timer
+      // Cancel all idle timers
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
+      }
+      if (spellIdleTimerRef.current) {
+        clearTimeout(spellIdleTimerRef.current)
+        spellIdleTimerRef.current = null
+      }
+      if (grammarIdleTimerRef.current) {
+        clearTimeout(grammarIdleTimerRef.current)
+        grammarIdleTimerRef.current = null
       }
 
       // Abort ongoing request
@@ -86,10 +100,18 @@ export function useIdleGrammarCheck({
 
     // Only cancel if the current check matches the specified type
     if (currentCheckTypeRef.current === checkType) {
-      // Cancel idle timer
+      // Cancel idle timers
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
+      }
+      if (spellIdleTimerRef.current) {
+        clearTimeout(spellIdleTimerRef.current)
+        spellIdleTimerRef.current = null
+      }
+      if (grammarIdleTimerRef.current) {
+        clearTimeout(grammarIdleTimerRef.current)
+        grammarIdleTimerRef.current = null
       }
 
       // Abort ongoing request
@@ -245,6 +267,44 @@ export function useIdleGrammarCheck({
     }
   }, [dismissedIds, onSuggestions, cancelCheck])
 
+  // Schedule idle spell check
+  const scheduleIdleSpellCheck = useCallback(() => {
+    if (!text.trim() || !isFocused) return
+
+    // Clear existing spell idle timer
+    if (spellIdleTimerRef.current) {
+      clearTimeout(spellIdleTimerRef.current)
+    }
+
+    // Schedule new spell check after idle timeout
+    spellIdleTimerRef.current = setTimeout(() => {
+      if (text.trim() && isFocused) {
+        const currentRevision = revisionRef.current + 1
+        console.log(`⏰ Idle spell check triggered (revision ${currentRevision})`)
+        performSpellCheck(text, currentRevision)
+      }
+    }, idleTimeout)
+  }, [text, isFocused, idleTimeout, performSpellCheck])
+
+  // Schedule idle grammar check
+  const scheduleIdleGrammarCheck = useCallback(() => {
+    if (!text.trim() || !isFocused) return
+
+    // Clear existing grammar idle timer
+    if (grammarIdleTimerRef.current) {
+      clearTimeout(grammarIdleTimerRef.current)
+    }
+
+    // Schedule new grammar check after idle timeout
+    grammarIdleTimerRef.current = setTimeout(() => {
+      if (text.trim() && isFocused) {
+        const currentRevision = revisionRef.current + 1
+        console.log(`⏰ Idle grammar check triggered (revision ${currentRevision})`)
+        performGrammarCheck(text, currentRevision)
+      }
+    }, idleTimeout)
+  }, [text, isFocused, idleTimeout, performGrammarCheck])
+
   // Perform both spelling and grammar checks (combined)
   const performCombinedCheck = useCallback(async (checkText: string, revision: number) => {
     if (!checkText.trim() || isCheckingRef.current) {
@@ -343,7 +403,7 @@ export function useIdleGrammarCheck({
 
   // Immediate spell check trigger (for spacebar)
   const triggerSpellCheck = useCallback(() => {
-    if (!text.trim() || !isFocused) return
+    if (!text.trim()) return
 
     // Only cancel spell checks, let grammar checks continue
     // cancelCheck('spell') - removed to let background checks complete
@@ -363,7 +423,7 @@ export function useIdleGrammarCheck({
 
   // Immediate grammar check trigger (for punctuation)
   const triggerGrammarCheck = useCallback(() => {
-    if (!text.trim() || !isFocused) return
+    if (!text.trim()) return
 
     // Only cancel grammar checks, let spell checks continue
     // cancelCheck('grammar') - removed to let background checks complete
@@ -402,20 +462,29 @@ export function useIdleGrammarCheck({
 
   // Handle text changes
   useEffect(() => {
-    // Just update the text reference - don't cancel background checks
+    // Update last text reference
     if (text !== lastTextRef.current) {
-      // Update last text reference
       lastTextRef.current = text
+      
+      // Schedule idle checks when text changes
+      if (text.trim() && isFocused) {
+        scheduleIdleSpellCheck()
+        scheduleIdleGrammarCheck()
+      }
     }
-  }, [text])
+  }, [text, isFocused, scheduleIdleSpellCheck, scheduleIdleGrammarCheck])
 
   // Handle focus changes
   useEffect(() => {
     if (!isFocused) {
       // Cancel checks when editor loses focus
-      cancelCheck()
+      // cancelCheck()
+    } else if (text.trim()) {
+      // Schedule idle checks when editor gains focus and has text
+      scheduleIdleSpellCheck()
+      scheduleIdleGrammarCheck()
     }
-  }, [isFocused, cancelCheck])
+  }, [isFocused, cancelCheck, scheduleIdleSpellCheck, scheduleIdleGrammarCheck, text])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -429,6 +498,8 @@ export function useIdleGrammarCheck({
     triggerGrammarCheck,
     triggerCheck,
     cancelCheck,
+    scheduleIdleSpellCheck,
+    scheduleIdleGrammarCheck,
     isChecking: isCheckingRef.current,
     revision: revisionRef.current
   }

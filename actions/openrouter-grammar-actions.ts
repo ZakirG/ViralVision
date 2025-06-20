@@ -74,7 +74,7 @@ function createGrammarPrompt(sentence: string): string {
 
 SENTENCE: "${sentence}"
 
-Please respond with a JSON array of grammar suggestions. Each suggestion should have:
+Please respond with a JSON array of grammar suggestions. NOT SPELLING SUGGESTIONS. ONLY GRAMMAR. PRETEND EVERYTHING IS SPELLED CORRECTLY. YOUR RESPONSE SHOULD NEVER CONTAIN THE WORD "SPELLING" IN IT. Each suggestion should have:
 - originalText: the exact text that needs to be changed
 - suggestedText: the corrected text
 - explanation: a brief explanation of the issue
@@ -119,7 +119,7 @@ async function callOpenRouter(sentence: string): Promise<GrammarSuggestion[]> {
         "X-Title": "ViralVision Grammar Checker"
       },
       body: JSON.stringify({
-        model: "openai/gpt-4.1-mini",
+        model: "gpt-4.1-nano-2025-04-14",
         messages: [
           {
             role: "user",

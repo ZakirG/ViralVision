@@ -444,6 +444,7 @@ export default function GrammarlyEditor() {
       
       if (result.isSuccess && result.data) {
         setRealSuggestions(result.data)
+        console.log("🔄 PARENT: result.data", result.data)
         console.log("🔄 PARENT: Updated realSuggestions with", result.data.length, "suggestions")
       }
     } catch (error) {

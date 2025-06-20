@@ -149,11 +149,13 @@ export async function checkSpellingOptimizedAction(
       console.log(`     → Replacements: ${match.replacements?.map(r => r.value).join(', ') || 'none'}`)
     })
 
-    const spellingMatches = languageToolResponse.matches.filter(match => 
-      match.rule.category.id === 'TYPOS' || 
-      match.type.typeName === 'UnknownWord' ||
-      (match.type.typeName === 'Other' && match.rule.category.name === 'Possible Typo')
-    )
+    // const spellingMatches = languageToolResponse.matches.filter(match => 
+    //   match.rule.category.id === 'TYPOS' || 
+    //   match.type.typeName === 'UnknownWord' ||
+    //   (match.type.typeName === 'Other' && match.rule.category.name === 'Possible Typo')
+    // )
+
+    const spellingMatches = languageToolResponse.matches;
 
     console.log("🚀 OPTIMIZED: Filtered spelling matches:", spellingMatches.length)
     spellingMatches.forEach((match, index) => {

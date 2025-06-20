@@ -111,15 +111,15 @@ export interface EditableContentRef {
 const Leaf = ({ attributes, children, leaf }: any) => {
   // Debug: Log when leaf has suggestion properties
   if (leaf.suggestion || leaf.spellingSuggestion || leaf.grammarSuggestion) {
-    console.log(`🎨 LEAF RENDER: Rendering leaf with suggestions:`, {
-      suggestion: leaf.suggestion,
-      spellingSuggestion: leaf.spellingSuggestion,
-      grammarSuggestion: leaf.grammarSuggestion,
-      spellingSuggestionId: leaf.spellingSuggestionId,
-      grammarSuggestionId: leaf.grammarSuggestionId,
-      suggestionId: leaf.suggestionId,
-      text: children?.props?.children || 'unknown'
-    })
+    // console.log(`🎨 LEAF RENDER: Rendering leaf with suggestions:`, {
+    //   suggestion: leaf.suggestion,
+    //   spellingSuggestion: leaf.spellingSuggestion,
+    //   grammarSuggestion: leaf.grammarSuggestion,
+    //   spellingSuggestionId: leaf.spellingSuggestionId,
+    //   grammarSuggestionId: leaf.grammarSuggestionId,
+    //   suggestionId: leaf.suggestionId,
+    //   text: children?.props?.children || 'unknown'
+    // })
   }
   
   // Build styles for multiple suggestion types
@@ -143,7 +143,7 @@ const Leaf = ({ attributes, children, leaf }: any) => {
       dataAttributes.title = leaf.spellingTitle || leaf.title
     }
     
-    console.log(`🎨 SPELLING STYLE: Applied spelling suggestion style for ID: ${leaf.spellingSuggestionId || leaf.suggestionId}`)
+    // console.log(`🎨 SPELLING STYLE: Applied spelling suggestion style for ID: ${leaf.spellingSuggestionId || leaf.suggestionId}`)
   }
   
   // Handle grammar suggestions with yellow background
@@ -159,8 +159,6 @@ const Leaf = ({ attributes, children, leaf }: any) => {
     if (leaf.grammarTitle || leaf.title) {
       dataAttributes.title = leaf.grammarTitle || leaf.title
     }
-    
-    console.log(`🎨 GRAMMAR STYLE: Applied grammar suggestion style for ID: ${leaf.grammarSuggestionId || leaf.suggestionId}`)
   }
   
   // Handle other suggestion types with pink background (fallback)
@@ -177,7 +175,6 @@ const Leaf = ({ attributes, children, leaf }: any) => {
       dataAttributes.title = leaf.title
     }
     
-    console.log(`🎨 OTHER STYLE: Applied other suggestion style for ID: ${leaf.suggestionId}`)
   }
   
   // Add transition for smooth hover effects
@@ -187,11 +184,7 @@ const Leaf = ({ attributes, children, leaf }: any) => {
   
   // Render with suggestions if any exist
   if (leaf.spellingSuggestion || leaf.grammarSuggestion || leaf.suggestion) {
-    console.log(`🎨 RENDERING SUGGESTION: Rendering span with styles:`, {
-      styles: Object.keys(styles),
-      dataAttributes: Object.keys(dataAttributes),
-      text: children?.props?.children || 'unknown'
-    })
+    
     
     return (
       <span
@@ -372,7 +365,7 @@ export const EditableContent = forwardRef<
   const [filteredSuggestions, setFilteredSuggestions] = useState<Suggestion[]>([]);
   
   useEffect(() => {
-    console.log("BACKEND SUGGESTIONS:", JSON.stringify(propSuggestions.map(s => s.originalText)));
+
     
     const filtered = propSuggestions.filter(s => 
       s.startOffset != null && s.endOffset != null && s.startOffset < s.endOffset
@@ -501,11 +494,12 @@ export const EditableContent = forwardRef<
   // Track previous text to avoid unnecessary checks
   const previousTextRef = useRef<string>("")
   const lastSpellCheckTimeRef = useRef<number>(0)
-  const WORD_COMPLETION_DELAY = 800 // Wait 800ms after user stops typing to check
+  const WORD_COMPLETION_DELAY = 50 // Wait 50ms after user stops typing to check
 
   // Add debug for key callbacks that might be changing
   const stableDebouncedWordCompleteSpellCheck = useCallback(
     debounce(async (text: string, docId: string) => {
+      console.log('>> calling stableDebouncedWordCompleteSpellCheck with text:', text);
       // Early return if no text content
       if (!text || !text.trim()) {
         return
@@ -514,10 +508,11 @@ export const EditableContent = forwardRef<
       try {
         // Preserve cursor position before API call
         const selectionBeforeCheck = editor.selection
-        
+        console.log('the text is:', text, " for spell check and we're about to call checkSpellingOptimizedAction");
         const result = await checkSpellingOptimizedAction(text, docId)
         
         if (result.isSuccess && result.data && Array.isArray(result.data)) {
+          console.log('the spell check result is:', result.data);
           // Update suggestions but preserve cursor position
           if (onDirectSuggestionsUpdate) {
             onDirectSuggestionsUpdate(result.data)
@@ -934,12 +929,15 @@ export const EditableContent = forwardRef<
     // Calculate text offset for this node
     const textOffset = calculateTextOffset(path);
     
+    
     const ranges: Array<Range & { suggestionData: ExtendedSuggestion }> = [];
 
     // Process each suggestion
     for (const suggestion of suggestions as ExtendedSuggestion[]) {
+      console.log('the decorate function is now looking at suggestion:', suggestion.originalText);
       // Skip stale suggestions
       if (suggestion.isStale) {
+        console.log('the suggestion is stale:', suggestion.originalText);
         continue;
       }
 
@@ -948,6 +946,7 @@ export const EditableContent = forwardRef<
       const suggestionEnd = suggestion.endOffset;
       
       if (suggestionStart === null || suggestionEnd === null) {
+        console.log('the suggestion has no start or end offset:', suggestion.originalText);
         continue;
       }
       
@@ -955,6 +954,7 @@ export const EditableContent = forwardRef<
       const nodeEnd = textOffset + text.length;
 
       if (suggestionStart >= nodeEnd || suggestionEnd <= nodeStart) {
+        console.log('the suggestion does not overlap with this text node:', suggestion.originalText);
         continue; // No overlap
       }
 
@@ -968,6 +968,7 @@ export const EditableContent = forwardRef<
 
       // Validate the text matches using the full document text for accuracy
       const fullText = slateToText(editor.children);
+      console.log('the full text is:', fullText, ' while checking suggestion:', suggestion.originalText);
       const currentTextAtOffset = fullText.substring(suggestionStart, suggestionEnd);
       const originalText = suggestion.originalText;
       if (!originalText) {
@@ -1070,14 +1071,14 @@ export const EditableContent = forwardRef<
       
       if (result.isSuccess) {
         // Refresh suggestions to update UI
-        console.log("🧹 CLEANUP: Database cleanup successful, calling onSuggestionsUpdated")
+        // console.log("🧹 CLEANUP: Database cleanup successful, calling onSuggestionsUpdated")
         if (onSuggestionsUpdated) {
           onSuggestionsUpdated()
         } else {
-          console.log("🧹 CLEANUP: onSuggestionsUpdated callback is not available")
+          // console.log("🧹 CLEANUP: onSuggestionsUpdated callback is not available")
         }
       } else {
-        console.log("🧹 CLEANUP: Database cleanup failed:", result.message)
+        // console.log("🧹 CLEANUP: Database cleanup failed:", result.message)
       }
     } catch (error) {
       console.error("Error during cleanup:", error)
@@ -1161,10 +1162,7 @@ export const EditableContent = forwardRef<
         ReactEditor.focus(editor)
       },
       replaceContent: (content: string) => {
-        console.log('🚀 REPLACE CONTENT CALLED:', {
-          content,
-          currentText: Node.string(editor)
-        })
+        
         
         // Set flags to prevent content reversion during viral critique update
         setIsViralCritiqueUpdating(true)
@@ -1172,7 +1170,7 @@ export const EditableContent = forwardRef<
         
         // Store the current text as baseline before applying the viral critique suggestion
         const currentText = Node.string(editor)
-        console.log('📝 SETTING BASELINE:', currentText)
+        // console.log('📝 SETTING BASELINE:', currentText)
         setBaseline(currentText)
         
         // Enter diff mode

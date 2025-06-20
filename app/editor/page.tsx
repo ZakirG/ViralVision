@@ -147,6 +147,24 @@ export default function GrammarlyEditor() {
 
   const documentId = searchParams.get("doc")
 
+  // Function to calculate and format speaking time
+  const calculateSpeakingTime = useCallback((content: string): string => {
+    const wordCount = content.split(/\s+/).filter(word => word.length > 0).length
+    const totalSeconds = Math.max(1, Math.ceil(wordCount * 0.3))
+    
+    if (totalSeconds < 60) {
+      return `${totalSeconds} sec`
+    } else {
+      const minutes = Math.floor(totalSeconds / 60)
+      const seconds = totalSeconds % 60
+      if (seconds === 0) {
+        return `${minutes} min`
+      } else {
+        return `${minutes} min ${seconds} sec`
+      }
+    }
+  }, [])
+
   // Simple hash function for viral critique content
   const hashViralCritiqueContent = useCallback((key: string, value: string): string => {
     // Create a simple hash based on the key and the first 100 characters of the value
@@ -1138,14 +1156,7 @@ export default function GrammarlyEditor() {
                     className="gap-2 text-sm text-gray-500 hover:text-gray-700"
                   >
                     <span>
-                      ~{Math.max(
-                        1,
-                        Math.ceil(
-                          documentContent
-                            .split(/\s+/)
-                            .filter(word => word.length > 0).length * 0.3
-                        )
-                      )} sec speaking time
+                      ~{calculateSpeakingTime(documentContent)} speaking time
                     </span>
                     <ChevronDown className="size-4 text-gray-400" />
                   </Button>
@@ -1168,15 +1179,7 @@ export default function GrammarlyEditor() {
                     </div>
 
                     <div className="text-sm text-gray-700">
-                      {Math.max(
-                        1,
-                        Math.ceil(
-                          documentContent
-                            .split(/\s+/)
-                            .filter(word => word.length > 0).length * 0.3
-                        )
-                      )}{" "}
-                      sec speaking time
+                      {calculateSpeakingTime(documentContent)} speaking time
                     </div>
                   </div>
                 </PopoverContent>

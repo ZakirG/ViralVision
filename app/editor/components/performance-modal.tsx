@@ -168,7 +168,7 @@ export function PerformanceModal({
                 <div className="flex justify-between">
                   <span className="text-gray-700">Speaking time</span>
                   <span className="font-semibold text-teal-600">
-                    {formatSpeakingTime(speakingTime)}
+                    {formatSpeakingTime(speakingTime)} speaking time
                   </span>
                 </div>
               </div>

@@ -21,7 +21,7 @@ import { Slate, Editable, withReact, ReactEditor } from "slate-react"
 import { withHistory, HistoryEditor } from "slate-history"
 import { updateSuggestionsAfterOperations } from "@/utils/pathAnchors"
 import { critiqueViralAbilityAction, type ViralCritique } from "@/actions/openai-critique-actions"
-import { makeDecorations, createUnifiedDiff } from "./diff-highlighter"
+import { createUnifiedDiff } from "./diff-highlighter"
 import { cn } from "@/lib/utils"
 import RevisionBar from "./revision-bar"
 
@@ -826,17 +826,10 @@ export const EditableContent = forwardRef<
 
   // Create decorations for suggestions with cursor protection
   const decorate = useCallback(([node, path]: [Node, number[]]) => {
-    console.log(`🎯 DECORATE CALLED: Processing node at path ${path.join(',')}, isText: ${Text.isText(node)}`)
-    
-    // Debug: Show document structure occasionally
-    if (path.length === 0) {
-      console.log(`🎯 DOCUMENT STRUCTURE:`, JSON.stringify(value, null, 2))
-    }
     
     const ranges: (Range & { suggestion: true; suggestionId: string; suggestionType: string | null; title: string } | Range & { added?: boolean; removed?: boolean })[] = []
     
     if (!Text.isText(node)) {
-      console.log(`🎯 DECORATE SKIP: Not a text node, skipping`)
       return ranges
     }
 
@@ -844,7 +837,7 @@ export const EditableContent = forwardRef<
     
     // Skip empty text nodes as they interfere with suggestion highlighting
     if (!nodeText || nodeText.trim() === '') {
-      console.log(`🎯 DECORATE SKIP: Empty text node, skipping`)
+     
       return ranges
     }
     
@@ -852,26 +845,26 @@ export const EditableContent = forwardRef<
     
     // Find the start offset of this text node in the full document
     let textOffset = 0
-    console.log(`🎯 TEXT OFFSET CALCULATION: Starting calculation for path:`, path.join(','))
+    
     
     for (const [n, p] of Node.nodes(editor)) {
       if (path.length > 0 && p[0] < path[0]) {
         if (Text.isText(n)) {
           textOffset += n.text.length
-          console.log(`🎯 TEXT OFFSET: Added ${n.text.length} from text node at path ${p.join(',')}, total: ${textOffset}`)
+          
         }
         // Add 1 for paragraph breaks (newlines)
         if (p.length === 1) {
           textOffset += 1
-          console.log(`🎯 TEXT OFFSET: Added 1 for paragraph break at path ${p.join(',')}, total: ${textOffset}`)
+          
         }
       } else if (path.length > 1 && p[0] === path[0] && p[1] < path[1]) {
         if (Text.isText(n)) {
           textOffset += n.text.length
-          console.log(`🎯 TEXT OFFSET: Added ${n.text.length} from text node at path ${p.join(',')}, total: ${textOffset}`)
+          
         }
       } else if (p.length === path.length && p.every((val, i) => val === path[i])) {
-        console.log(`🎯 TEXT OFFSET: Reached current node, final offset: ${textOffset}`)
+        
         break
       }
     }
@@ -949,23 +942,11 @@ export const EditableContent = forwardRef<
         const suggestionStart = suggestion.startOffset
         const suggestionEnd = suggestion.endOffset
         
-        console.log(`🎯 SUGGESTION: Processing suggestion ${suggestion.id}:`, {
-          type: suggestion.suggestionType,
-          originalText: suggestion.originalText,
-          startOffset: suggestionStart,
-          endOffset: suggestionEnd,
-          textOffset,
-          nodeTextLength: nodeText.length
-        })
+        
         
         // ENHANCED SAFETY CHECK: Verify the suggestion offsets are still valid for current text
         if (suggestionStart >= fullText.length || suggestionEnd > fullText.length || suggestionStart >= suggestionEnd) {
-          console.log(`🧹 OFFSET INVALID: Marking suggestion as stale due to invalid offsets:`, {
-            id: suggestion.id,
-            startOffset: suggestionStart,
-            endOffset: suggestionEnd,
-            fullTextLength: fullText.length
-          })
+          
           staleSuggestionIds.push(suggestion.id)
           return
         }
@@ -978,19 +959,7 @@ export const EditableContent = forwardRef<
         const normalizedCurrent = normalizeText(currentTextAtOffset)
         const normalizedOriginal = suggestion.originalText ? normalizeText(suggestion.originalText) : ''
         
-        // Debug logging for text comparison
-        if (suggestion.originalText && normalizedCurrent !== normalizedOriginal) {
-          console.log(`🧹 TEXT COMPARISON DEBUG:`, {
-            id: suggestion.id,
-            type: suggestion.suggestionType,
-            original: suggestion.originalText,
-            current: currentTextAtOffset,
-            normalizedOriginal,
-            normalizedCurrent,
-            startOffset: suggestionStart,
-            endOffset: suggestionEnd
-          })
-        }
+       
         
         // Only mark as stale if there's a significant mismatch (not just whitespace differences)
         if (suggestion.originalText && normalizedCurrent !== normalizedOriginal) {
@@ -1000,14 +969,7 @@ export const EditableContent = forwardRef<
           const originalLower = normalizedOriginal.toLowerCase()
           
           if (currentLower !== originalLower) {
-            console.log(`🧹 TEXT MISMATCH: Marking suggestion as stale:`, {
-              id: suggestion.id,
-              type: suggestion.suggestionType,
-              original: suggestion.originalText,
-              current: currentTextAtOffset,
-              normalizedOriginal,
-              normalizedCurrent
-            })
+            
             staleSuggestionIds.push(suggestion.id)
             return
           }
@@ -1337,7 +1299,10 @@ export const EditableContent = forwardRef<
         
         // Create unified diff that combines both old and new text
         const currentText = slateToText(editor.children)
+        // The content has <br> tags instead of newlines, replace them
+        content = content.replace(/<br>/g, '\n');
         const { combinedText, decorations } = createUnifiedDiff(currentText, content)
+        
         
         setCombinedDiffText(combinedText)
         setCombinedDiffDecorations(decorations)

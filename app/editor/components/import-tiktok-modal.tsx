@@ -10,6 +10,7 @@ import {
   DialogTitle
 } from "@/components/ui/dialog"
 import { Video, Loader2 } from "lucide-react"
+import { toast } from "@/hooks/use-toast"
 
 interface ImportTikTokModalProps {
   open: boolean
@@ -30,12 +31,32 @@ export function ImportTikTokModal({
       return
     }
 
+    // Validate TikTok URL format
+    try {
+      const urlObj = new URL(url.trim())
+      if (!urlObj.hostname.includes('tiktok.com')) {
+        toast({
+          title: "Invalid URL",
+          description: "Please enter a valid TikTok URL",
+          variant: "destructive"
+        })
+        return
+      }
+    } catch (error) {
+      toast({
+        title: "Invalid URL",
+        description: "Please enter a valid TikTok URL",
+        variant: "destructive"
+      })
+      return
+    }
+
     setIsLoading(true)
     try {
       console.log("Grabbing script from:", url)
       
-      // Make POST request to TikTok API
-      const response = await fetch("https://scriptadmin.tokbackup.com/v1/tiktok/fetchMultipleTikTokData?get_transcript=true&ip=104.173.219.145", {
+      // Make POST request to our TikTok API proxy instead of external API directly
+      const response = await fetch("/api/tiktok", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -164,12 +185,41 @@ export function ImportTikTokModal({
         onContentImport(formattedContent);
       }
       
+      // Show success message
+      toast({
+        title: "Script Imported!",
+        description: "TikTok script has been successfully imported into your editor",
+        duration: 3000
+      })
+      
       // Close modal after successful import
       onOpenChange(false)
       setUrl("")
     } catch (error) {
       console.error("Error grabbing script:", error)
-      // TODO: Show error message to user
+      
+      // Show user-friendly error message
+      let errorMessage = "Failed to import script from TikTok"
+      
+      if (error instanceof Error) {
+        if (error.message.includes('API request failed: 400')) {
+          errorMessage = "Invalid TikTok URL. Please check the URL and try again."
+        } else if (error.message.includes('API request failed: 404')) {
+          errorMessage = "TikTok video not found. The video may be private or deleted."
+        } else if (error.message.includes('API request failed: 408')) {
+          errorMessage = "Request timed out. Please try again."
+        } else if (error.message.includes('API request failed: 500')) {
+          errorMessage = "TikTok service is temporarily unavailable. Please try again later."
+        } else if (error.message.includes('Invalid or empty response')) {
+          errorMessage = "No transcript found for this video. The video may not have captions."
+        }
+      }
+      
+      toast({
+        title: "Import Failed",
+        description: errorMessage,
+        variant: "destructive"
+      })
     } finally {
       setIsLoading(false)
     }

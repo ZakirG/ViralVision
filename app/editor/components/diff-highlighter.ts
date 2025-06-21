@@ -11,6 +11,7 @@ export type Decoration = {
   end: number;
   added?: boolean;
   removed?: boolean;
+  text?: string;
 };
 
 export function getCharDiff(oldStr: string, newStr: string): CharDiff[] {
@@ -33,46 +34,13 @@ export function getCharDiff(oldStr: string, newStr: string): CharDiff[] {
   });
 }
 
-export function makeDecorations(editor: Editor, oldStr: string, newStr?: string): Decoration[] {
-  const currentStr = newStr || Node.string(editor);
-  const diffs = getCharDiff(oldStr, currentStr);
-  
-  const decorations: Decoration[] = [];
-  let currentOffset = 0;
-  
-  for (const diff of diffs) {
-    if (diff.type === 'added') {
-      // For added text, mark the range
-      const startOffset = currentOffset;
-      const endOffset = currentOffset + diff.text.length;
-      
-      decorations.push({
-        start: startOffset,
-        end: endOffset,
-        added: true
-      });
-      
-      currentOffset += diff.text.length;
-    } else if (diff.type === 'removed') {
-      // For removed text, mark the position where it would be
-      decorations.push({
-        start: currentOffset,
-        end: currentOffset,
-        removed: true
-      });
-    } else {
-      // Unchanged text, just advance the offset
-      currentOffset += diff.text.length;
-    }
-  }
-  
-  return decorations;
-}
+
 
 export function createUnifiedDiff(oldStr: string, newStr: string): { 
   combinedText: string; 
   decorations: Decoration[] 
 } {
+  console.log(">>> createUnifiedDiff is getting diffs: ", oldStr, newStr);
   const dmp = new diff_match_patch();
   const diffs = dmp.diff_main(oldStr, newStr);
   dmp.diff_cleanupSemantic(diffs);
@@ -85,12 +53,15 @@ export function createUnifiedDiff(oldStr: string, newStr: string): {
     const [type, text] = diff;
     
     if (type === 1) { // INSERT - add new text
+      console.log(">>> createUnifiedDiff is adding new text: ", text);
+      console.log(">>> createUnifiedDiff currentOffset: ", currentOffset);
       decorations.push({
         start: currentOffset,
         end: currentOffset + text.length,
         added: true
       });
       combinedText += text;
+      console.log(">>> createUnifiedDiff combinedText: ", combinedText);
       currentOffset += text.length;
     } else if (type === -1) { // DELETE - keep old text with strikethrough
       decorations.push({
@@ -105,7 +76,11 @@ export function createUnifiedDiff(oldStr: string, newStr: string): {
       currentOffset += text.length;
     }
   }
-  
+  // add text content to decorations
+  decorations.forEach((decoration) => {
+    decoration.text = combinedText.slice(decoration.start, decoration.end);
+  });
+  console.log(">>> createUnifiedDiff returning decorations: ", decorations);
   return { combinedText, decorations };
 }
 

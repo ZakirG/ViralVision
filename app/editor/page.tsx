@@ -80,7 +80,7 @@ Keep the rest of the script intact, just add the hook at the beginning.`,
 - Questions and direct address to the viewer
 Maintain the same core message but make it much more engaging and natural to speak.`,
   
-  addOnscreenText: `Add suggestions for onscreen text that would enhance the video and stop a user dead in their tracks, make them curious to watch the video more. We only need to add onscreen text for the hook (first few sentences of the script) and then the call to action. Your hook text should be a different phrasing of the hook and offer different information than the script. A good hook: Grabs attention in the first 3 seconds. The general topic of the video should be immediately clear from the onscreen text hook. If the audience is niche, the hook should include a specific audience call-out so that audiences know whether the video is for them and they stop scrolling. The hook should contain a moment of emotional tension, expectation, suspense, or confusion that makes the user stop scrolling to resolve the tension. An example of a good hook: 'SCIENTISTS ARE PUTTING LIVING BRAIN CELLS INTO COMPUTERS'. Notice how the onscreen text hook is SPECIFIC, INTERESTING, UNIQUE, and summarizes the video topic.
+  addOnscreenText: `Add suggestions for onscreen text that would enhance the video and stop a user dead in their tracks, make them curious to watch the video more. We only need to add onscreen text for the hook (first few sentences of the script) and then the call to action. Do not alter the paragraph breaks in the script. Your hook text should be a different phrasing of the hook and offer different information than the script. A good hook: Grabs attention in the first 3 seconds. The general topic of the video should be immediately clear from the onscreen text hook. If the audience is niche, the hook should include a specific audience call-out so that audiences know whether the video is for them and they stop scrolling. The hook should contain a moment of emotional tension, expectation, suspense, or confusion that makes the user stop scrolling to resolve the tension. An example of a good hook: 'SCIENTISTS ARE PUTTING LIVING BRAIN CELLS INTO COMPUTERS'. Notice how the onscreen text hook is SPECIFIC, INTERESTING, UNIQUE, and summarizes the video topic.
 The onscreen text should be in square brackets, interspersed into the script. Format as: [Onscreen text: "suggested text"] at appropriate points in the script.`,
   
   addDeliveryTips: `Add delivery tips and performance notes in 3-4 places in this script to help with verbal delivery of specific lines or phrases in the script.
@@ -428,23 +428,18 @@ export default function GrammarlyEditor() {
     
     // Prevent refreshing while accepting a suggestion to avoid race conditions
     if (isAcceptingSuggestion) {
-      console.log("🔄 PARENT: refreshSuggestions skipped - suggestion acceptance in progress")
+      
       return
     }
     
-    console.log("🔄 PARENT: refreshSuggestions starting for documentId:", documentId)
+    
     
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
-      console.log("🔄 PARENT: getSuggestionsByDocumentIdAction result:", {
-        isSuccess: result.isSuccess,
-        dataLength: result.data?.length || 0,
-        suggestions: result.data?.map(s => ({ id: s.id, type: s.suggestionType, text: s.originalText })) || []
-      })
       
       if (result.isSuccess && result.data) {
         setRealSuggestions(result.data)
-        console.log("🔄 PARENT: Updated realSuggestions with", result.data.length, "suggestions")
+       
       }
     } catch (error) {
       console.error("🔄 PARENT: Error refreshing suggestions:", error)
@@ -637,12 +632,12 @@ export default function GrammarlyEditor() {
 
   // Protected suggestion update callback that respects the acceptance lock
   const handleSuggestionsUpdated = useCallback(() => {
-    console.log("🔄 PARENT: handleSuggestionsUpdated called, isAcceptingSuggestion:", isAcceptingSuggestion)
+    
     if (isAcceptingSuggestion) {
       // Skip refresh while accepting a suggestion
-      console.log("🔄 PARENT: Skipping refresh due to suggestion acceptance in progress")
+      // console.log("🔄 PARENT: Skipping refresh due to suggestion acceptance in progress")
     } else {
-      console.log("🔄 PARENT: Calling refreshSuggestions")
+      // console.log("🔄 PARENT: Calling refreshSuggestions")
       refreshSuggestions()
     }
   }, [isAcceptingSuggestion, refreshSuggestions])

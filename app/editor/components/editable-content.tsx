@@ -1207,6 +1207,79 @@ export const EditableContent = forwardRef<
     [cleanupStaleSuggestions]
   )
 
+  // Function to apply italic formatting to content in square brackets
+  const applyItalicToBrackets = useCallback(() => {
+    // Find all text wrapped in square brackets and apply italic formatting
+    const fullText = slateToText(editor.children)
+    const bracketRegex = /\[([^\]]+)\]/g
+    let match
+    const brackets: Array<{ start: number; end: number; text: string }> = []
+    
+    // Find all bracket matches
+    while ((match = bracketRegex.exec(fullText)) !== null) {
+      brackets.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[0]
+      })
+    }
+    
+    // Apply italic formatting to each bracket match
+    brackets.forEach(bracket => {
+      // Build a mapping of text offsets to Slate positions
+      const offsetToPosition: Array<{ path: number[], offset: number }> = []
+      let textOffset = 0
+      
+      // Walk through all text nodes to build offset mapping
+      for (const [node, path] of Node.nodes(editor)) {
+        if (Text.isText(node)) {
+          // Map each character position in this text node
+          for (let i = 0; i <= node.text.length; i++) {
+            offsetToPosition[textOffset + i] = { path, offset: i }
+          }
+          textOffset += node.text.length
+        } else if (path.length === 1 && textOffset > 0) {
+          // Only add newline offset if this is not the first paragraph
+          const paragraphIndex = path[0]
+          if (paragraphIndex > 0) {
+            offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
+            textOffset += 1
+          }
+        }
+      }
+      
+      // Get start and end positions for this bracket
+      const startPos = offsetToPosition[bracket.start]
+      const endPos = offsetToPosition[bracket.end]
+      
+      if (startPos && endPos) {
+        try {
+          // Create the selection range
+          const range = {
+            anchor: startPos,
+            focus: endPos
+          }
+          
+          // Select the range and apply italic formatting
+          Transforms.select(editor, range)
+          Editor.addMark(editor, 'italic', true)
+        } catch (error) {
+          // Silent error handling
+        }
+      }
+    })
+    
+    // Increment content change trigger to force decoration update
+    contentChangeTriggerRef.current += 1
+    
+    // Clear selection after applying formatting
+    try {
+      Transforms.deselect(editor)
+    } catch (error) {
+      // Silent error handling
+    }
+  }, [editor])
+
   // Handle click events on suggestions
   const handleClick = useCallback((event: React.MouseEvent) => {
     const target = event.target as HTMLElement
@@ -1353,79 +1426,9 @@ export const EditableContent = forwardRef<
           debouncedViralCritiqueCheckRef.current?.(currentText)
         }
       },
-      applyItalicToBrackets: () => {
-        // Find all text wrapped in square brackets and apply italic formatting
-        const fullText = slateToText(editor.children)
-        const bracketRegex = /\[([^\]]+)\]/g
-        let match
-        const brackets: Array<{ start: number; end: number; text: string }> = []
-        
-        // Find all bracket matches
-        while ((match = bracketRegex.exec(fullText)) !== null) {
-          brackets.push({
-            start: match.index,
-            end: match.index + match[0].length,
-            text: match[0]
-          })
-        }
-        
-        // Apply italic formatting to each bracket match
-        brackets.forEach(bracket => {
-          // Build a mapping of text offsets to Slate positions
-          const offsetToPosition: Array<{ path: number[], offset: number }> = []
-          let textOffset = 0
-          
-          // Walk through all text nodes to build offset mapping
-          for (const [node, path] of Node.nodes(editor)) {
-            if (Text.isText(node)) {
-              // Map each character position in this text node
-              for (let i = 0; i <= node.text.length; i++) {
-                offsetToPosition[textOffset + i] = { path, offset: i }
-              }
-              textOffset += node.text.length
-            } else if (path.length === 1 && textOffset > 0) {
-              // Only add newline offset if this is not the first paragraph
-              const paragraphIndex = path[0]
-              if (paragraphIndex > 0) {
-                offsetToPosition[textOffset] = { path: [...path, 0], offset: 0 }
-                textOffset += 1
-              }
-            }
-          }
-          
-          // Get start and end positions for this bracket
-          const startPos = offsetToPosition[bracket.start]
-          const endPos = offsetToPosition[bracket.end]
-          
-          if (startPos && endPos) {
-            try {
-              // Create the selection range
-              const range = {
-                anchor: startPos,
-                focus: endPos
-              }
-              
-              // Select the range and apply italic formatting
-              Transforms.select(editor, range)
-              Editor.addMark(editor, 'italic', true)
-            } catch (error) {
-              // Silent error handling
-            }
-          }
-        })
-        
-        // Increment content change trigger to force decoration update
-        contentChangeTriggerRef.current += 1
-        
-        // Clear selection after applying formatting
-        try {
-          Transforms.deselect(editor)
-        } catch (error) {
-          // Silent error handling
-        }
-      }
+      applyItalicToBrackets: applyItalicToBrackets
     }
-  }, [editor, acceptSuggestion]) // MINIMAL STABLE DEPENDENCIES
+  }, [editor, acceptSuggestion, applyItalicToBrackets]) // MINIMAL STABLE DEPENDENCIES
 
   // Run initial checks on page load when content is available
   useEffect(() => {
@@ -1508,14 +1511,22 @@ export const EditableContent = forwardRef<
       {diffMode && (
         <RevisionBar
           onAccept={() => {
+            console.log(">>> onAccept is called");
             // Accept the changes - apply the new content and exit diff mode
+            console.log('onAccept new content: ', newContent);
             const newNodes = htmlToSlate(newContent)
+            
+            console.log('onAccept new nodes: ', newNodes);
             while (editor.children.length > 0) {
               Transforms.removeNodes(editor, { at: [0] })
             }
             newNodes.forEach((node, i) => {
               Transforms.insertNodes(editor, node, { at: [i] })
             })
+            
+            // Apply italic formatting to content in square brackets
+            applyItalicToBrackets()
+            
             setBaseline(newContent) // Update baseline to the new HTML content
             setDiffMode(false)
             setNewContent('') // Clear the new content

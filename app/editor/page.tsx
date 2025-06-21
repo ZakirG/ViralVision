@@ -1346,9 +1346,10 @@ export default function GrammarlyEditor() {
                                     {style.label}
                                   </div>
                                   <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-                                    <span className="break-words">
-                                      {value}
-                                    </span>
+                                    <span 
+                                      className="break-words"
+                                      dangerouslySetInnerHTML={{ __html: value }}
+                                    />
                                     <Info className="size-3 shrink-0" />
                                   </div>
                                   <div className="flex flex-wrap gap-2">
@@ -1425,9 +1426,10 @@ export default function GrammarlyEditor() {
                                   </div>
                                 )}
                                 <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-                                  <span className="break-words">
-                                    {suggestion.explanation || 'Click to see details'}
-                                  </span>
+                                  <span 
+                                    className="break-words"
+                                    dangerouslySetInnerHTML={{ __html: suggestion.explanation || 'Click to see details' }}
+                                  />
                                   <Info className="size-3 shrink-0" />
                                 </div>
                                 {suggestion.confidence && (
@@ -1505,7 +1507,7 @@ export default function GrammarlyEditor() {
                       disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
-                        <span className="font-medium">Add a viral hook</span>
+                        <span className="font-medium">⚓ Add a viral hook</span>
                       </div>
                     </Button>
 
@@ -1517,7 +1519,7 @@ export default function GrammarlyEditor() {
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Add suggestions for onscreen text
+                        📖 Add suggestions for onscreen text
                         </span>
                       </div>
                     </Button>
@@ -1531,7 +1533,7 @@ export default function GrammarlyEditor() {
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Shorten script to under 30 seconds
+                          ⏱️ Shorten script to under 30 seconds
                         </span>
                       </div>
                     </Button>
@@ -1544,7 +1546,7 @@ export default function GrammarlyEditor() {
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Add tips for verbal delivery
+                          🎤 Add tips for verbal delivery
                         </span>
                       </div>
                     </Button>
@@ -1557,7 +1559,7 @@ export default function GrammarlyEditor() {
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Rewrite to be more conversational
+                          💬 Rewrite to be more conversational
                         </span>
                       </div>
                     </Button>

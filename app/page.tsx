@@ -37,6 +37,7 @@ import {
 import type { Document } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 import Link from "next/link"
+import Image from "next/image"
 
 export default function HomePage() {
   const { isSignedIn, user, isLoaded } = useUser()
@@ -54,8 +55,12 @@ export default function HomePage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 items-center justify-center rounded-full bg-primary-brand">
-            <span className="text-sm font-bold text-white">V</span>
+          <div className="mx-auto mb-4 flex size-12 items-center justify-center">
+            <img 
+              src="/logo.png" 
+              alt="ViralVision Logo" 
+              className="logo-standard"
+            />
           </div>
           <p className="text-gray-600">Loading...</p>
         </div>
@@ -73,12 +78,11 @@ export default function HomePage() {
             <div className="flex items-center justify-between py-4">
               {/* Logo */}
               <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-full bg-primary-brand">
-                  <span className="text-sm font-bold text-white">V</span>
-                </div>
-                <span className="text-xl font-bold text-gray-900">
-                  ViralVision
-                </span>
+                <img 
+                  src="/logo.png" 
+                  alt="ViralVision Logo" 
+                  className="logo-standard"
+                />
               </div>
 
               {/* Navigation */}
@@ -255,8 +259,12 @@ export default function HomePage() {
                 </Card>
 
                 {/* Floating ViralVision logo */}
-                <div className="absolute -bottom-4 -right-4 flex size-12 items-center justify-center rounded-full bg-primary-brand shadow-lg">
-                  <span className="text-lg font-bold text-white">V</span>
+                <div className="absolute -bottom-4 -right-4 flex size-20 items-center justify-center rounded-full bg-white shadow-lg">
+                  <img 
+                    src="/logo.png" 
+                    alt="ViralVision Logo" 
+                    className="logo-standard"
+                  />
                 </div>
               </div>
             </div>
@@ -353,10 +361,11 @@ export default function HomePage() {
             <div className="grid gap-8 md:grid-cols-4">
               <div>
                 <div className="mb-4 flex items-center gap-2">
-                  <div className="flex size-8 items-center justify-center rounded-full bg-primary-brand">
-                    <span className="text-sm font-bold text-white">V</span>
-                  </div>
-                  <span className="text-xl font-bold">ViralVision</span>
+                  <img 
+                    src="/logo.png" 
+                    alt="ViralVision Logo" 
+                    className="logo-standard"
+                  />
                 </div>
                 <p className="text-gray-400">
                   AI-powered scriptwriting tool that helps video content creators 

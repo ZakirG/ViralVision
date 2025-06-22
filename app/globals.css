@@ -66,6 +66,31 @@ body {
     color: hsl(var(--primary-brand-dark));
   }
   
+  /* Standardized logo styling */
+  .logo-standard {
+    width: 83px;
+    
+    border-radius: 0.5rem;
+    object-fit: contain;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .logo-standard-small {
+    width: 83px;
+    
+    border-radius: 0.5rem;
+    object-fit: contain;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
   /* Gradient utilities */
   .bg-gradient-primary {
     background: linear-gradient(135deg, hsl(var(--primary-brand)) 0%, hsl(var(--primary-brand-hover)) 100%);

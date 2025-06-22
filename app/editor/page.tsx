@@ -59,6 +59,7 @@ import { rewriteContentWithCritiqueAction } from "@/actions/openai-rewrite-actio
 import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
 import type { ViralCritique } from "@/actions/openai-critique-actions"
+import Image from "next/image"
 
 // AI Quick Action Prompts
 const QUICK_ACTION_PROMPTS = {
@@ -955,8 +956,12 @@ export default function GrammarlyEditor() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-primary-brand">
-            <span className="text-sm font-bold text-white">V</span>
+          <div className="mx-auto mb-4 flex size-12 animate-pulse items-center justify-center">
+            <img 
+              src="/logo.png" 
+              alt="ViralVision Logo" 
+              className="logo-standard"
+            />
           </div>
           <p className="text-gray-600">Loading document...</p>
         </div>
@@ -1016,9 +1021,13 @@ export default function GrammarlyEditor() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => router.push("/dashboard")}
-                className="flex size-6 cursor-pointer items-center justify-center rounded-full bg-primary-brand transition-colors hover:bg-primary-brand-hover"
+                className="flex cursor-pointer items-center justify-center transition-colors hover:opacity-80"
               >
-                <span className="text-xs font-bold text-white">V</span>
+                <img
+                  src="/logo.png"
+                  alt="ViralVision Logo"
+                  className="logo-standard-small"
+                />
               </button>
               <Button
                 variant="ghost"
@@ -1257,12 +1266,12 @@ export default function GrammarlyEditor() {
                   onClick={() => setActiveMainTab("review")}
                   className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "review"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1">
-                    <div className="size-2 rounded-full bg-teal-600"></div>
+                    <div className="size-2 rounded-full bg-primary-brand"></div>
                     <span className="text-center leading-tight">Smart Review</span>
                   </div>
                 </button>
@@ -1270,7 +1279,7 @@ export default function GrammarlyEditor() {
                   onClick={() => setActiveMainTab("smart-revise")}
                   className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "smart-revise"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >
@@ -1285,7 +1294,7 @@ export default function GrammarlyEditor() {
                   onClick={() => setActiveMainTab("ai-write")}
                   className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "ai-write"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >

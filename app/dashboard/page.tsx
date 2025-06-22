@@ -139,7 +139,7 @@ export default function Dashboard() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-12 items-center justify-center">
+          <div className="mx-auto flex size-20 items-center justify-center">
             <img 
               src="/logo.png" 
               alt="ViralVision Logo" 
@@ -258,7 +258,7 @@ export default function Dashboard() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
-                <div className="mx-auto mb-4 flex size-12 animate-pulse items-center justify-center">
+                <div className="mx-auto flex size-20 animate-pulse items-center justify-center">
                   <img 
                     src="/logo.png" 
                     alt="ViralVision Logo" 

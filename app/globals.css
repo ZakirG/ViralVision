@@ -68,8 +68,7 @@ body {
   
   /* Standardized logo styling */
   .logo-standard {
-    width: 83px;
-    
+    width: 78px;
     border-radius: 0.5rem;
     object-fit: contain;
     image-rendering: -webkit-optimize-contrast;
@@ -80,8 +79,8 @@ body {
   }
   
   .logo-standard-small {
-    width: 83px;
-    
+    width: 36px;
+    height: 36px;
     border-radius: 0.5rem;
     object-fit: contain;
     image-rendering: -webkit-optimize-contrast;
@@ -90,6 +89,7 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   
   /* Gradient utilities */
   .bg-gradient-primary {

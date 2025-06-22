@@ -55,7 +55,7 @@ export default function HomePage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-12 items-center justify-center">
+          <div className="mx-auto flex size-20 items-center justify-center">
             <img 
               src="/logo.png" 
               alt="ViralVision Logo" 
@@ -73,7 +73,7 @@ export default function HomePage() {
     return (
       <div className="min-h-screen bg-white">
         {/* Header */}
-        <header className="border-b border-gray-200">
+        <header className="bg-primary-brand">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between py-4">
               {/* Logo */}
@@ -89,22 +89,22 @@ export default function HomePage() {
               <nav className="hidden items-center space-x-8 md:flex">
                 <a
                   href="#features"
-                  className="text-gray-600 hover:text-gray-900"
+                  className="text-white hover:text-gray-200"
                 >
                   Features
                 </a>
                 <a
                   href="#pricing"
-                  className="text-gray-600 hover:text-gray-900"
+                  className="text-white hover:text-gray-200"
                 >
                   Pricing
                 </a>
-                <a href="#about" className="text-gray-600 hover:text-gray-900">
+                <a href="#about" className="text-white hover:text-gray-200">
                   About
                 </a>
                 <a
                   href="#contact"
-                  className="text-gray-600 hover:text-gray-900"
+                  className="text-white hover:text-gray-200"
                 >
                   Contact
                 </a>
@@ -113,10 +113,12 @@ export default function HomePage() {
               {/* Auth buttons */}
               <div className="flex items-center gap-4">
                 <SignInButton mode="modal">
-                  <Button variant="ghost">Log in</Button>
+                  <Button variant="ghost" className="text-white hover:bg-white hover:text-primary-brand">
+                    Log in
+                  </Button>
                 </SignInButton>
                 <SignInButton mode="modal">
-                  <Button className="bg-primary-brand hover:bg-primary-brand-hover">
+                  <Button className="bg-white text-primary-brand hover:bg-gray-100">
                     Start Creating - It's free
                   </Button>
                 </SignInButton>

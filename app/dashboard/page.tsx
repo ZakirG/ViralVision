@@ -141,7 +141,7 @@ export default function Dashboard() {
         <div className="text-center">
           <div className="mx-auto flex size-20 items-center justify-center">
             <img 
-              src="/logo.png" 
+              src="/logo-svg.svg" 
               alt="ViralVision Logo" 
               className="logo-standard"
             />
@@ -176,7 +176,7 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-gray-200 p-4">
           <img 
-            src="/logo.png" 
+            src="/logo-svg.svg" 
             alt="ViralVision Logo" 
             className="logo-standard"
           />
@@ -260,7 +260,7 @@ export default function Dashboard() {
               <div className="text-center">
                 <div className="mx-auto flex size-20 animate-pulse items-center justify-center">
                   <img 
-                    src="/logo.png" 
+                    src="/logo-svg.svg" 
                     alt="ViralVision Logo" 
                     className="logo-standard"
                   />

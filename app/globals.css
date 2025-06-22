@@ -68,7 +68,7 @@ body {
   
   /* Standardized logo styling */
   .logo-standard {
-    width: 78px;
+    width: 150px;
     border-radius: 0.5rem;
     object-fit: contain;
     image-rendering: -webkit-optimize-contrast;

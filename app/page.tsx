@@ -57,7 +57,7 @@ export default function HomePage() {
         <div className="text-center">
           <div className="mx-auto flex size-20 items-center justify-center">
             <img 
-              src="/logo.png" 
+              src="/logo-svg.svg" 
               alt="ViralVision Logo" 
               className="logo-standard"
             />
@@ -79,9 +79,13 @@ export default function HomePage() {
               {/* Logo */}
               <div className="flex items-center gap-2">
                 <img 
-                  src="/logo.png" 
+                  src="/logo-svg.svg" 
                   alt="ViralVision Logo" 
                   className="logo-standard"
+                  style={{
+                    backgroundColor: "white",
+                    borderRadius: "0",
+                  }}
                 />
               </div>
 
@@ -263,7 +267,7 @@ export default function HomePage() {
                 {/* Floating ViralVision logo */}
                 <div className="absolute -bottom-4 -right-4 flex size-20 items-center justify-center rounded-full bg-white shadow-lg">
                   <img 
-                    src="/logo.png" 
+                    src="/logo-svg.svg" 
                     alt="ViralVision Logo" 
                     className="logo-standard"
                   />
@@ -364,7 +368,7 @@ export default function HomePage() {
               <div>
                 <div className="mb-4 flex items-center gap-2">
                   <img 
-                    src="/logo.png" 
+                    src="/logo-svg.svg" 
                     alt="ViralVision Logo" 
                     className="logo-standard"
                   />

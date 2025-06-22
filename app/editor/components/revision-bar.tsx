@@ -1,6 +1,8 @@
 "use client"
 
 import React from "react"
+import { Button } from "@/components/ui/button"
+import { Check, X } from "lucide-react"
 
 interface RevisionBarProps {
   onAccept: () => void
@@ -11,18 +13,22 @@ const RevisionBar: React.FC<RevisionBarProps> = ({ onAccept, onReject }) => {
   return (
     <div className="fixed bottom-4 inset-x-0 flex justify-center z-50">
       <div className="bg-white shadow-lg rounded-lg flex gap-4 px-6 py-3 border">
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors"
+        <Button
+          variant="outline"
           onClick={onAccept}
+          className="flex items-center gap-2"
         >
           Accept
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+          <Check className="size-4 text-green-600" />
+        </Button>
+        <Button
+          variant="outline"
           onClick={onReject}
+          className="flex items-center gap-2"
         >
           Reject
-        </button>
+          <X className="size-4 text-red-600" />
+        </Button>
       </div>
     </div>
   )

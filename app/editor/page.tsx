@@ -958,7 +958,7 @@ export default function GrammarlyEditor() {
         <div className="text-center">
           <div className="mx-auto flex size-20 animate-pulse items-center justify-center">
             <img 
-              src="/logo.png" 
+              src="/logo-svg.svg" 
               alt="ViralVision Logo" 
               className="logo-standard"
             />
@@ -1024,7 +1024,7 @@ export default function GrammarlyEditor() {
                 className="flex cursor-pointer items-center justify-center transition-colors hover:opacity-80"
               >
                 <img
-                  src="/logo.png"
+                  src="/logo-svg.svg"
                   alt="ViralVision Logo"
                   className="logo-standard"
                 />

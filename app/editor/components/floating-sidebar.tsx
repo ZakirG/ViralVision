@@ -30,8 +30,8 @@ interface FloatingSidebarProps {
 export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
   const router = useRouter()
 
-  const handleMyWordWise = () => {
-    router.push("/")
+  const handleMyViralVision = () => {
+    router.push("/dashboard")
     onClose()
   }
 
@@ -60,15 +60,15 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
           </Button>
         </div>
 
-        {/* My WordWise */}
+        {/* My ViralVision */}
         <div className="px-4 py-3">
           <Button
             variant="ghost"
             className="h-8 w-full justify-start gap-3 text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            onClick={handleMyWordWise}
+            onClick={handleMyViralVision}
           >
             <Home className="size-4" />
-            My WordWise
+            My video plans
           </Button>
         </div>
 
@@ -119,14 +119,6 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
                 Print
               </div>
               <span className="text-xs text-gray-500">⌘+P</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <History className="size-4" />
-              Version history
             </Button>
           </div>
         </div>
@@ -209,65 +201,17 @@ export function FloatingSidebar({ isOpen, onClose }: FloatingSidebarProps) {
 
         <Separator className="mx-4" />
 
-        {/* Editor Settings */}
-        <div className="px-4 py-3">
-          <Button
-            variant="ghost"
-            className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-          >
-            <Settings className="size-4" />
-            Editor settings
-          </Button>
-        </div>
-
-        <Separator className="mx-4" />
-
-        {/* Account Section */}
-        <div className="px-4 py-3">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
-              Account
-            </div>
-            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-              Free
-            </span>
-          </div>
-
-          <div className="mb-3">
-            <div className="text-sm font-medium text-gray-900">
-              Zakir Gowani
-            </div>
-            <div className="text-xs text-gray-500">zakirgowani@gmail.com</div>
-          </div>
-
-          <div className="space-y-0.5">
+        {/* Footer */}
+        <div className="mt-auto border-t border-gray-200 p-4">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>ViralVision v1.0</span>
             <Button
               variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
+              size="sm"
+              className="h-6 gap-1 text-xs"
             >
-              <Diamond className="size-4" />
-              Get Pro
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-between text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <div className="flex items-center gap-3">
-                <Flag className="size-4" />
-                Language preference
-              </div>
+              Help
               <ChevronRight className="size-3" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              className="h-8 w-full justify-start gap-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-            >
-              <span className="flex size-4 items-center justify-center text-sm">
-                💳
-              </span>
-              Subscription
             </Button>
           </div>
         </div>

@@ -1,1 +1,1 @@
-# WordWise
+# ViralVision

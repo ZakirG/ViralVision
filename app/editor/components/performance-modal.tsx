@@ -100,7 +100,9 @@ export function PerformanceModal({
                 Text score:{" "}
                 <span className="font-semibold">{textScore} out of 100</span>.
                 This score represents the quality of writing in this document.
-                You can increase it by addressing WordWise's suggestions.
+                <p className="text-sm text-gray-600">
+                  You can increase it by addressing ViralVision's suggestions.
+                </p>
               </p>
             </div>
             <div className="ml-6 shrink-0">
@@ -166,7 +168,7 @@ export function PerformanceModal({
                 <div className="flex justify-between">
                   <span className="text-gray-700">Speaking time</span>
                   <span className="font-semibold text-teal-600">
-                    {formatSpeakingTime(speakingTime)}
+                    {formatSpeakingTime(speakingTime)} speaking time
                   </span>
                 </div>
               </div>
@@ -180,7 +182,7 @@ export function PerformanceModal({
                 Readability
               </h3>
               <span className="text-sm text-gray-500">
-                Metrics compared to other WordWise users
+                Metrics compared to other ViralVision users
               </span>
             </div>
 

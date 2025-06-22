@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
   Menu,
   Target,
+  Settings,
   BarChart3,
   ChevronRight,
   ChevronLeft,
@@ -19,7 +20,8 @@ import {
   List,
   ListOrdered,
   Type,
-  ChevronDown
+  ChevronDown,
+  Video
 } from "lucide-react"
 import {
   EditableContent,
@@ -32,6 +34,7 @@ import {
 } from "@/components/ui/popover"
 import { ContentGoalsModal } from "./components/content-goals-modal"
 import { PerformanceModal } from "./components/performance-modal"
+import { ImportTikTokModal } from "./components/import-tiktok-modal"
 import { FloatingSidebar } from "./components/floating-sidebar"
 import { SuggestionPanel } from "./components/suggestion-panel"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -48,11 +51,50 @@ import {
 import { 
   logSuggestionAcceptedAction, 
   logSuggestionRejectedAction,
-  logGrammarCheckAction 
+  logGrammarCheckAction,
+  logFeatureUsageAction
 } from "@/actions/analytics-actions"
 import { targetedRecheckAction } from "@/actions/targeted-recheck-actions"
+import { rewriteContentWithCritiqueAction } from "@/actions/openai-rewrite-actions"
 import type { Document, Suggestion } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
+import type { ViralCritique } from "@/actions/openai-critique-actions"
+import Image from "next/image"
+
+// AI Quick Action Prompts
+const QUICK_ACTION_PROMPTS = {
+  shortenScript: `Rewrite this script to be under 30 seconds when spoken aloud, which should be under about 9 sentences when spoken casually. Keep the core message and key points, but make it much more concise and punchy. Focus on the most important information and remove any filler words or redundant phrases. The goal is to maintain impact while dramatically reducing length.`,
+  
+  addViralHook: `Add a compelling viral hook at the beginning of this script. The hook should grab attention within the first 3 seconds and make viewers want to keep watching. Use techniques like:
+- Start with a surprising fact or statistic
+- Ask a provocative question
+- Create curiosity or mystery
+- Use strong emotional language
+- Make a bold claim or promise
+Keep the rest of the script intact, just add the hook at the beginning.`,
+  
+  rewriteConversational: `Rewrite this script to sound more natural and conversational when spoken aloud. Make it feel like you're talking to a friend rather than reading from a script. Use:
+- Contractions (don't, can't, won't, etc.)
+- Natural speech patterns and flow
+- Conversational transitions
+- Relatable language and examples
+- Questions and direct address to the viewer
+Maintain the same core message but make it much more engaging and natural to speak.`,
+  
+  addOnscreenText: `Add suggestions for onscreen text that would enhance the video and stop a user dead in their tracks, make them curious to watch the video more. We only need to add onscreen text for the hook (first few sentences of the script) and then the call to action. Do not alter the paragraph breaks in the script. Your hook text should be a different phrasing of the hook and offer different information than the script. A good hook: Grabs attention in the first 3 seconds. The general topic of the video should be immediately clear from the onscreen text hook. If the audience is niche, the hook should include a specific audience call-out so that audiences know whether the video is for them and they stop scrolling. The hook should contain a moment of emotional tension, expectation, suspense, or confusion that makes the user stop scrolling to resolve the tension. An example of a good hook: 'SCIENTISTS ARE PUTTING LIVING BRAIN CELLS INTO COMPUTERS'. Notice how the onscreen text hook is SPECIFIC, INTERESTING, UNIQUE, and summarizes the video topic.
+The onscreen text should be in square brackets, interspersed into the script. Format as: [Onscreen text: "suggested text"] at appropriate points in the script.`,
+  
+  addDeliveryTips: `Add delivery tips and performance notes in 3-4 places in this script to help with verbal delivery of specific lines or phrases in the script.
+- Pacing and timing
+- Emphasis on key words
+- Tone and emotion
+- Gestures or body language
+- Pauses and breaks
+- Voice inflection
+Something to consider: hooks should generally be delivered with punchy, staccato inflection and at a generally fast pace.
+Format as: [Delivery tip: "tip"] at appropriate points in the script.
+Examples: [Delivery tip: Read this line with a staccato, punchy rhythm to emphasize how important this is.] [Delivery tip: Whisper the last few words of this line to make the idea seem like a secret.] [Delivery tip: Start the line out fast and then slow down towards then end to make the idea seem very dramatic.]`
+}
 
 interface FormatState {
   isBold: boolean
@@ -75,6 +117,7 @@ export default function GrammarlyEditor() {
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [goalsModalOpen, setGoalsModalOpen] = useState(false)
   const [performanceModalOpen, setPerformanceModalOpen] = useState(false)
+  const [tiktokModalOpen, setTiktokModalOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [formatState, setFormatState] = useState<FormatState>({
     isBold: false,
@@ -90,6 +133,13 @@ export default function GrammarlyEditor() {
   const [suggestionPanelOpen, setSuggestionPanelOpen] = useState(false)
   const [realSuggestions, setRealSuggestions] = useState<Suggestion[]>([])
   const [isAcceptingSuggestion, setIsAcceptingSuggestion] = useState(false)
+  const [viralCritique, setViralCritique] = useState<ViralCritique | null>(null)
+  const [isViralCritiqueLoading, setIsViralCritiqueLoading] = useState(false)
+  const [applyingViralCritiqueKey, setApplyingViralCritiqueKey] = useState<string | null>(null)
+  const [isViralCritiqueUpdating, setIsViralCritiqueUpdating] = useState(false)
+  const [appliedViralCritiques, setAppliedViralCritiques] = useState<Set<string>>(new Set())
+  const [aiResponse, setAiResponse] = useState("")
+  const [isAiLoading, setIsAiLoading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -97,6 +147,66 @@ export default function GrammarlyEditor() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
 
   const documentId = searchParams.get("doc")
+
+  // Function to calculate and format speaking time
+  const calculateSpeakingTime = useCallback((content: string): string => {
+    const wordCount = content.split(/\s+/).filter(word => word.length > 0).length
+    const totalSeconds = Math.max(1, Math.ceil(wordCount * 0.3))
+    
+    if (totalSeconds < 60) {
+      return `${totalSeconds} sec`
+    } else {
+      const minutes = Math.floor(totalSeconds / 60)
+      const seconds = totalSeconds % 60
+      if (seconds === 0) {
+        return `${minutes} min`
+      } else {
+        return `${minutes} min ${seconds} sec`
+      }
+    }
+  }, [])
+
+  // Simple hash function for viral critique content
+  const hashViralCritiqueContent = useCallback((key: string, value: string): string => {
+    // Create a simple hash based on the key and the first 100 characters of the value
+    const content = `${key}:${value.substring(0, 100)}`
+    let hash = 0
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return `${key}-${Math.abs(hash).toString(36)}`
+  }, [])
+
+  // Load dismissed viral critiques from localStorage on mount
+  useEffect(() => {
+    if (documentId) {
+      const storageKey = `dismissed-viral-critiques-${documentId}`
+      try {
+        const stored = localStorage.getItem(storageKey)
+        if (stored) {
+          const dismissedCritiques = JSON.parse(stored)
+          setAppliedViralCritiques(new Set(dismissedCritiques))
+        }
+      } catch (error) {
+        console.error("🚀 VIRAL CRITIQUE: Error loading dismissed critiques from localStorage:", error)
+      }
+    }
+  }, [documentId])
+
+  // Save dismissed viral critiques to localStorage whenever they change
+  useEffect(() => {
+    if (documentId && appliedViralCritiques.size > 0) {
+      const storageKey = `dismissed-viral-critiques-${documentId}`
+      try {
+        const dismissedArray = Array.from(appliedViralCritiques)
+        localStorage.setItem(storageKey, JSON.stringify(dismissedArray))
+      } catch (error) {
+        console.error("🚀 VIRAL CRITIQUE: Error saving dismissed critiques to localStorage:", error)
+      }
+    }
+  }, [documentId, appliedViralCritiques])
 
   const loadDocument = useCallback(async () => {
     if (!documentId) return
@@ -115,7 +225,6 @@ export default function GrammarlyEditor() {
           title: result.data.title || "Untitled Document",
           content: result.data.rawText || ""
         }
-        console.log("💾 SAVE: Document loaded, initialized lastSavedContent")
       } else {
         toast({
           title: "Error",
@@ -158,7 +267,6 @@ export default function GrammarlyEditor() {
 
     try {
       setSaving(true)
-      console.log("💾 SAVE: Updating document in database")
       const result = await updateDocumentAction(documentId, {
         title: documentTitle,
         rawText: documentContent
@@ -170,7 +278,6 @@ export default function GrammarlyEditor() {
           title: documentTitle,
           content: documentContent
         }
-        console.log("💾 SAVE: Document saved successfully, updated lastSavedContent")
       } else {
         console.error("Save failed:", result.message)
         // Only show toast if component is still mounted
@@ -210,17 +317,16 @@ export default function GrammarlyEditor() {
         const hasTitleChanged = documentTitle !== lastSaved.title
         
         if (hasContentChanged || hasTitleChanged) {
-          console.log("💾 SAVE: Content changed, triggering auto-save:", {
-            contentChanged: hasContentChanged,
-            titleChanged: hasTitleChanged,
-            oldContentLength: lastSaved.content.length,
-            newContentLength: documentContent.length,
-            oldTitle: lastSaved.title,
-            newTitle: documentTitle
-          })
           saveDocument()
+          toast({
+            title: "Saved",
+            description: "Document saved successfully"
+          })
         } else {
-          console.log("🚫 SAVE: Content unchanged, skipping auto-save (preventing unnecessary POST)")
+          toast({
+            title: "No Changes",
+            description: "Document is already up to date"
+          })
         }
       }
     }, 2000) // Auto-save after 2 seconds of inactivity
@@ -250,7 +356,6 @@ export default function GrammarlyEditor() {
         description: "Document saved successfully"
       })
     } else {
-      console.log("💾 SAVE: Manual save - no changes to save")
       toast({
         title: "No Changes",
         description: "Document is already up to date"
@@ -296,8 +401,10 @@ export default function GrammarlyEditor() {
 
   // Content handling functions
   const handleContentChange = useCallback((newContent: string) => {
+    // Always update the document content, even during viral critique updates
+    // The editor is now updated directly, so we just need to sync the parent state
     setDocumentContent(newContent)
-  }, [])
+  }, [documentContent])
 
   const handleFormatStateChange = useCallback((newFormatState: FormatState) => {
     setFormatState(newFormatState)
@@ -313,16 +420,6 @@ export default function GrammarlyEditor() {
 
   // Suggestion handling functions
   const handleSuggestionClick = useCallback((suggestion: Suggestion) => {
-    console.log("🎯 PARENT: Suggestion clicked:", {
-      id: suggestion.id,
-      text: suggestion.suggestedText,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset,
-      isInCurrentList: realSuggestions.some(s => s.id === suggestion.id),
-      currentListCount: realSuggestions.length,
-      currentListIds: realSuggestions.map(s => s.id)
-    })
-    
     setSelectedSuggestionForPanel(suggestion)
     setSuggestionPanelOpen(true)
   }, [realSuggestions])
@@ -332,32 +429,18 @@ export default function GrammarlyEditor() {
     
     // Prevent refreshing while accepting a suggestion to avoid race conditions
     if (isAcceptingSuggestion) {
-      console.log("🔄 PARENT: Skipping refreshSuggestions - currently accepting a suggestion")
+      
       return
     }
     
-    console.log("🔄 PARENT: refreshSuggestions called for documentId:", documentId)
+    
     
     try {
       const result = await getSuggestionsByDocumentIdAction(documentId, 1)
+      
       if (result.isSuccess && result.data) {
-        console.log("🔄 PARENT: Retrieved", result.data.length, "suggestions from DB:", 
-          result.data.map(s => ({ id: s.id, text: s.suggestedText })))
-        
-        // Database query already filters out accepted and dismissed suggestions
-        setRealSuggestions(prev => {
-          console.log("🔄 PARENT: UPDATING realSuggestions:", {
-            previousCount: prev.length,
-            previousIds: prev.map(s => s.id),
-            newCount: result.data.length,
-            newIds: result.data.map(s => s.id),
-            idsChanged: !prev.every(p => result.data.some(n => n.id === p.id)) || prev.length !== result.data.length
-          })
-          return result.data
-        })
-        console.log("🔄 PARENT: Updated realSuggestions state with", result.data.length, "suggestions")
-      } else {
-        console.log("🔄 PARENT: refreshSuggestions failed or no data:", result)
+        setRealSuggestions(result.data)
+       
       }
     } catch (error) {
       console.error("🔄 PARENT: Error refreshing suggestions:", error)
@@ -367,7 +450,6 @@ export default function GrammarlyEditor() {
     const handleSuggestionAccept = useCallback(async (suggestion: Suggestion) => {
     // Prevent concurrent suggestion acceptance
     if (isAcceptingSuggestion) {
-      console.log("⚡ PARENT: Already accepting a suggestion, ignoring this request")
       return
     }
 
@@ -380,11 +462,6 @@ export default function GrammarlyEditor() {
       return
     }
 
-    console.log("⚡ PARENT: INSTANT ACCEPT - Applying changes immediately:", {
-      suggestionId: suggestion.id,
-      suggestionText: suggestion.suggestedText
-    })
-
     // ⚡ INSTANT STEP 1: Apply text change in editor immediately
     if (!editorRef.current) {
       toast({
@@ -396,14 +473,11 @@ export default function GrammarlyEditor() {
     }
 
     try {
-      console.log("⚡ PARENT: Applying text change instantly in editor")
       editorRef.current.acceptSuggestion(suggestion)
       
       // ⚡ INSTANT STEP 2: Remove suggestion from UI immediately
-      console.log("⚡ PARENT: Removing suggestion from UI instantly")
       setRealSuggestions(prev => {
         const filtered = prev.filter(s => s.id !== suggestion.id)
-        console.log(`⚡ PARENT: Instantly removed suggestion from UI: ${prev.length} -> ${filtered.length}`)
         return filtered
       })
       
@@ -415,7 +489,6 @@ export default function GrammarlyEditor() {
       })
       
       // 🔄 BACKGROUND STEP 4: Do database operations asynchronously (non-blocking)
-      console.log("🔄 PARENT: Starting background database operations...")
       
       // Set a brief lock to prevent multiple rapid clicks
       setIsAcceptingSuggestion(true)
@@ -424,16 +497,12 @@ export default function GrammarlyEditor() {
       // Fire and forget - do all database operations in background
       const backgroundOperations = async () => {
         try {
-          console.log("🔄 BACKGROUND: Marking suggestion as accepted in database")
-          
           // Database operation 1: Mark as accepted
           const acceptResult = await acceptSuggestionAction(suggestion.id)
           
           if (!acceptResult.isSuccess) {
             // console.error("🔄 BACKGROUND: Database accept failed (non-critical):", acceptResult.message)
             // Don't show error to user since UI change already happened
-          } else {
-            console.log("🔄 BACKGROUND: Database accept successful")
           }
           
           // Database operation 2: Log analytics
@@ -443,13 +512,10 @@ export default function GrammarlyEditor() {
               suggestion.suggestionType || 'unknown',
               documentId
             )
-            console.log("🔄 BACKGROUND: Analytics logged")
           }
           
           // Database operation 3: Targeted recheck for grammar suggestions
           if (suggestion.suggestionType === 'grammar') {
-            console.log("🔄 BACKGROUND: Starting targeted recheck for grammar suggestion")
-            
             // Calculate the NEW offsets after the text replacement
             const originalStart = suggestion.startOffset || 0
             const originalEnd = suggestion.endOffset || 0
@@ -457,13 +523,6 @@ export default function GrammarlyEditor() {
             
             const newStart = originalStart
             const newEnd = originalStart + suggestedText.length
-            
-            console.log("🔄 BACKGROUND: Calculating recheck area:", {
-              originalRange: `${originalStart}-${originalEnd}`,
-              newRange: `${newStart}-${newEnd}`,
-              suggestedTextLength: suggestedText.length,
-              originalTextLength: originalEnd - originalStart
-            })
             
             if (documentId) {
               const recheckResult = await targetedRecheckAction(
@@ -474,7 +533,6 @@ export default function GrammarlyEditor() {
               )
               
               if (recheckResult.isSuccess) {
-                console.log("🔄 BACKGROUND: Targeted recheck completed successfully")
                 const totalNewSuggestions = recheckResult.data.spellingSuggestions.length + recheckResult.data.grammarSuggestions.length
                 
                 if (totalNewSuggestions > 0) {
@@ -495,7 +553,6 @@ export default function GrammarlyEditor() {
             }
           } else {
             // For spelling suggestions, just refresh to ensure consistency
-            console.log("🔄 BACKGROUND: Doing background refresh for spelling suggestion")
             setTimeout(() => refreshSuggestions(), 500)
           }
           
@@ -528,26 +585,14 @@ export default function GrammarlyEditor() {
   }, [documentId, refreshSuggestions, isAcceptingSuggestion, documentContent])
 
   const handleSuggestionReject = useCallback(async (suggestion: Suggestion) => {
-    console.log("🔍 DISMISSAL DEBUG: handleSuggestionReject called for suggestion:", {
-      id: suggestion.id,
-      text: suggestion.suggestedText,
-      startOffset: suggestion.startOffset,
-      endOffset: suggestion.endOffset
-    })
-    
     try {
       // Mark suggestion as dismissed in database
-      console.log("🔍 DISMISSAL DEBUG: Calling dismissSuggestionAction for id:", suggestion.id, "with document content")
       const result = await dismissSuggestionAction(suggestion.id, documentContent)
       
-      console.log("🔍 DISMISSAL DEBUG: dismissSuggestionAction result:", result)
-      
       if (result.isSuccess) {
-        console.log("🔍 DISMISSAL DEBUG: Dismissal successful, removing from local state")
         // Remove the dismissed suggestion from the list immediately
         setRealSuggestions(prev => {
           const filtered = prev.filter(s => s.id !== suggestion.id)
-          console.log(`🎨 PARENT: Updated realSuggestions from ${prev.length} to ${filtered.length} suggestions`)
           return filtered
         })
         
@@ -565,7 +610,6 @@ export default function GrammarlyEditor() {
           description: "The suggestion has been permanently hidden and won't appear again."
         })
       } else {
-        console.log("🔍 DISMISSAL DEBUG: Dismissal failed:", result.message)
         toast({
           title: "Error",
           description: "Failed to dismiss suggestion. Please try again.",
@@ -589,12 +633,309 @@ export default function GrammarlyEditor() {
 
   // Protected suggestion update callback that respects the acceptance lock
   const handleSuggestionsUpdated = useCallback(() => {
+    
     if (isAcceptingSuggestion) {
-      console.log("🔄 PARENT: Skipping onSuggestionsUpdated callback - currently accepting a suggestion")
+      // Skip refresh while accepting a suggestion
+      // console.log("🔄 PARENT: Skipping refresh due to suggestion acceptance in progress")
     } else {
+      // console.log("🔄 PARENT: Calling refreshSuggestions")
       refreshSuggestions()
     }
   }, [isAcceptingSuggestion, refreshSuggestions])
+
+  // Viral critique update callback
+  const handleViralCritiqueUpdate = useCallback((critique: ViralCritique | null, isLoading: boolean) => {
+    setViralCritique(critique)
+    setIsViralCritiqueLoading(isLoading)
+  }, [appliedViralCritiques])
+
+  const handleViralCritiqueApply = useCallback(async (critiqueKey: string, critiqueValue: string) => {
+    if (applyingViralCritiqueKey || !documentContent.trim()) {
+      return
+    }
+
+    try {
+      setApplyingViralCritiqueKey(critiqueKey)
+      setIsViralCritiqueUpdating(true)
+
+      // Call the rewrite action
+      const result = await rewriteContentWithCritiqueAction(documentContent, critiqueValue)
+
+      if (result.isSuccess && result.data) {
+        // Replace the content in the editor using the editor's replaceContent method
+        if (editorRef.current) {
+          editorRef.current.replaceContent(result.data)
+          
+          // Apply italic formatting to text wrapped in square brackets
+          setTimeout(() => {
+            if (editorRef.current) {
+              editorRef.current.applyItalicToBrackets()
+            }
+          }, 100) // Small delay to ensure content is fully loaded
+        } else {
+          console.error("🚀 VIRAL CRITIQUE: Editor ref is null!")
+        }
+        
+        // Mark this viral critique as applied
+        const contentHash = hashViralCritiqueContent(critiqueKey, critiqueValue)
+        setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
+        
+        // Note: setDocumentContent will be called by the editor's onContentChange callback
+        
+        // Log analytics for viral critique usage
+        if (documentId) {
+          await logFeatureUsageAction(
+            'viral_critique_applied',
+            documentId,
+            {
+              critiqueType: critiqueKey,
+              originalContentLength: documentContent.length,
+              newContentLength: result.data.length
+            }
+          )
+        }
+        
+        // Show success message
+        toast({
+          title: "Content Rewritten!",
+          description: `Applied ${critiqueKey.replace(/_/g, ' ')} suggestion`,
+          duration: 3000
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to apply suggestion",
+          variant: "destructive"
+        })
+        console.error("🚀 VIRAL CRITIQUE: Failed to apply suggestion:", result.message)
+      }
+    } catch (error) {
+      console.error("🚀 VIRAL CRITIQUE: Error applying suggestion:", error)
+      toast({
+        title: "Error",
+        description: "Failed to apply suggestion. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setApplyingViralCritiqueKey(null)
+      // Delay clearing the update flag to prevent immediate reversion
+      setTimeout(() => {
+        setIsViralCritiqueUpdating(false)
+      }, 1000)
+    }
+  }, [documentContent, applyingViralCritiqueKey, documentId])
+
+  const handleTikTokContentImport = useCallback((importedContent: string) => {
+    // Use the editor's insertContent method to append the content
+    if (editorRef.current) {
+      editorRef.current.insertContent(importedContent)
+      
+      // Apply italic formatting to text wrapped in square brackets
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.applyItalicToBrackets()
+        }
+      }, 100) // Small delay to ensure content is fully loaded
+      
+      // Trigger viral critique check after content import
+      // Add a delay to ensure the content has been fully inserted
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.triggerViralCritique()
+        }
+      }, 1000) // 1 second delay to ensure content is fully inserted
+    }
+  }, [])
+
+  const handleAiMessageSend = useCallback(async () => {
+    if (!aiChatInput.trim() || isAiLoading) return
+
+    try {
+      setIsAiLoading(true)
+      setAiResponse("")
+
+      // Call OpenAI API
+      const response = await fetch('/api/openai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: aiChatInput,
+          systemPrompt: "You are ViralVision, an AI assistant that helps create viral video scripts. Write engaging, conversational scripts that are optimized for social media platforms like TikTok, Instagram Reels, and YouTube Shorts. Focus on creating hooks that grab attention, maintaining viewer engagement, and including calls to action."
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to get AI response')
+      }
+
+      const data = await response.json()
+      const aiGeneratedScript = data.response
+
+      // Set the AI response to display
+      setAiResponse(aiGeneratedScript)
+
+      // Append the AI response to the editor content
+      if (editorRef.current) {
+        const currentContent = documentContent
+        const newContent = currentContent + '\n\n' + aiGeneratedScript
+        editorRef.current.replaceContent(newContent)
+        
+        // Apply italic formatting to text wrapped in square brackets
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.applyItalicToBrackets()
+          }
+        }, 100)
+      }
+
+      // Clear the input
+      setAiChatInput("")
+
+      // Show success message
+      toast({
+        title: "Script Generated!",
+        description: "AI script has been added to your editor",
+        duration: 3000
+      })
+
+    } catch (error) {
+      console.error('Error calling OpenAI:', error)
+      toast({
+        title: "Error",
+        description: "Failed to generate script. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsAiLoading(false)
+    }
+  }, [aiChatInput, isAiLoading, documentContent])
+
+  // Handle quick actions with AI rewriting
+  const handleQuickAction = useCallback(async (actionType: keyof typeof QUICK_ACTION_PROMPTS) => {
+    if (!documentContent.trim()) {
+      toast({
+        title: "No Content",
+        description: "Please add some content to the editor first.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (applyingViralCritiqueKey) {
+      toast({
+        title: "Action in Progress",
+        description: "Please wait for the current action to complete.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      setApplyingViralCritiqueKey(actionType)
+      setIsViralCritiqueUpdating(true)
+      
+      const prompt = QUICK_ACTION_PROMPTS[actionType]
+      const fullPrompt = `${prompt}\n\nScript:\n${documentContent}`
+      
+      // Call the rewrite action with the specific prompt
+      const result = await rewriteContentWithCritiqueAction(documentContent, fullPrompt)
+
+      if (result.isSuccess && result.data) {
+        // Replace the content in the editor
+        if (editorRef.current) {
+          editorRef.current.replaceContent(result.data)
+          
+          // Apply italic formatting to text wrapped in square brackets
+          setTimeout(() => {
+            if (editorRef.current) {
+              editorRef.current.applyItalicToBrackets()
+            }
+          }, 100) // Small delay to ensure content is fully loaded
+        } else {
+          console.error("Quick Action: Editor ref is null!")
+        }
+        
+        // Log analytics for quick action usage
+        if (documentId) {
+          await logFeatureUsageAction(
+            'quick_action_applied',
+            documentId,
+            {
+              actionType: actionType,
+              originalContentLength: documentContent.length,
+              newContentLength: result.data.length
+            }
+          )
+        }
+        
+        // Show success message
+        const actionNames = {
+          shortenScript: "Shortened script",
+          addViralHook: "Added viral hook",
+          rewriteConversational: "Made conversational",
+          addOnscreenText: "Added onscreen text",
+          addDeliveryTips: "Added delivery tips"
+        }
+        
+        toast({
+          title: "Content Updated!",
+          description: `${actionNames[actionType]} successfully`,
+          duration: 3000
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to apply quick action",
+          variant: "destructive"
+        })
+        console.error("Quick Action: Failed to apply:", result.message)
+      }
+    } catch (error) {
+      console.error("Quick Action: Error applying action:", error)
+      toast({
+        title: "Error",
+        description: "Failed to apply quick action. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setApplyingViralCritiqueKey(null)
+      // Delay clearing the update flag to prevent immediate reversion
+      setTimeout(() => {
+        setIsViralCritiqueUpdating(false)
+      }, 1000)
+    }
+  }, [documentContent, applyingViralCritiqueKey, documentId])
+
+  // Helper function to get colors and labels for different critique types
+  const getCritiqueTypeStyle = useCallback((key: string) => {
+    // Define available color schemes
+    const colorSchemes = [
+      { bg: 'bg-green-200', dot: 'bg-green-500' },
+    ]
+    
+    // Create a simple hash from the key to consistently assign colors
+    let hash = 0
+    for (let i = 0; i < key.length; i++) {
+      const char = key.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    
+    // Use the hash to select a color scheme
+    const colorIndex = Math.abs(hash) % colorSchemes.length
+    const selectedColor = colorSchemes[colorIndex]
+    
+    // Generate a human-readable label from the key
+    const label = `${key.charAt(0).toUpperCase() + key.slice(1).replace(/[_]/g, ' ')} suggestion`
+    
+    return {
+      bg: selectedColor.bg,
+      dot: selectedColor.dot,
+      label: label
+    }
+  }, [])
 
   // Fetch suggestions when document loads or rejected suggestions change
   useEffect(() => {
@@ -603,13 +944,24 @@ export default function GrammarlyEditor() {
     }
   }, [documentId, document, refreshSuggestions])
 
+  // Use real suggestions from database instead of mock data
+  // CRITICAL FIX: Stabilize suggestions prop to prevent cursor jumping
+  // Only create new reference when suggestion IDs actually change
+  const suggestions = useMemo(() => {
+    return realSuggestions
+  }, [realSuggestions.map(s => s.id).sort().join(',')]) // Only change when IDs change
+
   // Show loading state - this early return is now AFTER all hooks
   if (loading || !isLoaded) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 animate-pulse items-center justify-center rounded-full bg-teal-600">
-            <span className="text-sm font-bold text-white">W</span>
+          <div className="mx-auto mb-4 flex size-12 animate-pulse items-center justify-center">
+            <img 
+              src="/logo.png" 
+              alt="ViralVision Logo" 
+              className="logo-standard"
+            />
           </div>
           <p className="text-gray-600">Loading document...</p>
         </div>
@@ -621,9 +973,6 @@ export default function GrammarlyEditor() {
   if (!isSignedIn) {
     return null
   }
-
-  // Use real suggestions from database instead of mock data
-  const suggestions = realSuggestions
 
   const tabs = [
     { id: "correctness", label: "Correctness", color: "bg-red-500", score: 85 },
@@ -672,14 +1021,19 @@ export default function GrammarlyEditor() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => router.push("/dashboard")}
-                className="flex size-6 cursor-pointer items-center justify-center rounded-full bg-teal-600 transition-colors hover:bg-teal-700"
+                className="flex cursor-pointer items-center justify-center transition-colors hover:opacity-80"
               >
-                <span className="text-xs font-bold text-white">W</span>
+                <img
+                  src="/logo.png"
+                  alt="ViralVision Logo"
+                  className="logo-standard-small"
+                />
               </button>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(true)}
+                className="hidden"
               >
                 <Menu className="size-4" />
               </Button>
@@ -715,26 +1069,14 @@ export default function GrammarlyEditor() {
             ) : (
               <span className="text-sm text-gray-400">Saved</span>
             )} */}
-            <Button variant="outline" size="sm" onClick={handleSave}>
-              Save
-            </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-2"
-              onClick={() => setGoalsModalOpen(true)}
+              onClick={() => setTiktokModalOpen(true)}
             >
-              <Target className="size-4" />
-              Content Goals
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => setPerformanceModalOpen(true)}
-            >
-              <BarChart3 className="size-4" />
-              Overall score
+              <Video className="size-4" />
+              Import script from TikTok
             </Button>
           </div>
 
@@ -744,7 +1086,7 @@ export default function GrammarlyEditor() {
         {/* Editor content */}
         <div className="flex flex-1 overflow-hidden">
           {/* Text editor */}
-          <div className="flex-1 overflow-auto p-8">
+          <div className="flex-1 overflow-auto p-8" style={{ paddingBottom: "100px" }}>
             <div className="prose w-full max-w-none" spellCheck="false">
               <EditableContent
                 ref={editorRef}
@@ -756,6 +1098,7 @@ export default function GrammarlyEditor() {
                 suggestions={suggestions}
                 onSuggestionsUpdated={handleSuggestionsUpdated}
                 isAcceptingSuggestion={isAcceptingSuggestion}
+                onViralCritiqueUpdate={handleViralCritiqueUpdate}
               />
             </div>
           </div>
@@ -830,12 +1173,7 @@ export default function GrammarlyEditor() {
                     className="gap-2 text-sm text-gray-500 hover:text-gray-700"
                   >
                     <span>
-                      {
-                        documentContent
-                          .split(/\s+/)
-                          .filter(word => word.length > 0).length
-                      }{" "}
-                      words
+                      ~{calculateSpeakingTime(documentContent)} speaking time
                     </span>
                     <ChevronDown className="size-4 text-gray-400" />
                   </Button>
@@ -858,36 +1196,7 @@ export default function GrammarlyEditor() {
                     </div>
 
                     <div className="text-sm text-gray-700">
-                      {Math.max(
-                        1,
-                        Math.ceil(
-                          documentContent
-                            .split(/\s+/)
-                            .filter(word => word.length > 0).length / 200
-                        )
-                      )}{" "}
-                      sec reading time
-                    </div>
-
-                    <div className="text-sm text-gray-700">
-                      {Math.max(
-                        1,
-                        Math.ceil(
-                          documentContent
-                            .split(/\s+/)
-                            .filter(word => word.length > 0).length / 150
-                        )
-                      )}{" "}
-                      sec speaking time
-                    </div>
-
-                    <div className="text-sm text-gray-700">
-                      Readability score —{" "}
-                      {documentContent
-                        .split(/\s+/)
-                        .filter(word => word.length > 0).length < 10
-                        ? "not enough text"
-                        : "good"}
+                      {calculateSpeakingTime(documentContent)} speaking time
                     </div>
                   </div>
                 </PopoverContent>
@@ -906,14 +1215,14 @@ export default function GrammarlyEditor() {
       >
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           onClick={() => setRightPanelCollapsed(!rightPanelCollapsed)}
-          className="size-12 rounded-full border-2 border-gray-400 bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
+          className="size-8 rounded-[4px] border bg-white shadow-xl transition-all duration-200 hover:bg-gray-50 hover:shadow-2xl"
         >
           {rightPanelCollapsed ? (
-            <ChevronLeft className="size-8 text-gray-700" />
+            <ChevronLeft className="size-6 text-gray-700" />
           ) : (
-            <ChevronRight className="size-8 text-gray-700" />
+            <ChevronRight className="size-6 text-gray-700" />
           )}
         </Button>
       </div>
@@ -952,40 +1261,40 @@ export default function GrammarlyEditor() {
           <>
             {/* Main tabs */}
             <div className="border-b border-gray-200">
-              <div className="flex">
+              <div className="grid grid-cols-3">
                 <button
                   onClick={() => setActiveMainTab("review")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "review"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1">
-                    <div className="size-2 rounded-full bg-teal-600"></div>
-                    <span className="text-center leading-tight">Review</span>
+                    <div className="size-2 rounded-full bg-primary-brand"></div>
+                    <span className="text-center leading-tight">Smart Review</span>
                   </div>
                 </button>
                 <button
                   onClick={() => setActiveMainTab("smart-revise")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "smart-revise"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >
                   <div className="flex items-center justify-center gap-1">
                     <Sparkles className="size-3" />
                     <span className="text-center leading-tight">
-                      Smart Revise
+                      Quick Actions
                     </span>
                   </div>
                 </button>
                 <button
                   onClick={() => setActiveMainTab("ai-write")}
-                  className={`flex-1 border-b-2 px-2 py-3 text-xs font-medium ${
+                  className={`border-b-2 px-2 py-3 text-xs font-medium ${
                     activeMainTab === "ai-write"
-                      ? "border-teal-500 bg-teal-50 text-teal-600"
+                      ? "border-primary-brand bg-primary-brand-light text-primary-brand"
                       : "border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   }`}
                 >
@@ -997,54 +1306,112 @@ export default function GrammarlyEditor() {
               </div>
             </div>
 
-            {/* Tab content - keep all existing tab content exactly the same */}
-            {activeMainTab === "review" && (
-              <div className="flex flex-1 flex-col">
-                {/* Review suggestions header */}
-                <div className="shrink-0 border-b border-gray-200 p-4">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h2 className="font-semibold text-gray-900">
-                      Review suggestions
-                    </h2>
-                    <div className="flex size-6 items-center justify-center rounded-full bg-gray-100">
-                      <span className="text-xs font-medium text-gray-600">
-                        {suggestions.length}
-                      </span>
+            {/* Tab content */}
+                        {activeMainTab === "review" && (
+              <div className="flex flex-1 flex-col overflow-y-scroll" id='wrapper-suggestions'>
+                {/* Script Critique Loading Indicator */}
+                {isViralCritiqueLoading && (!viralCritique || Object.keys(viralCritique).length === 0) && (
+                  <div className="border-b border-gray-200 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="animate-spin h-4 w-4 border border-purple-400 border-t-transparent rounded-full"></div>
+                      <span className="text-sm text-gray-600">Script critique loading...</span>
                     </div>
                   </div>
+                )}
 
-                  {/* Category tabs */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {tabs.map(tab => (
-                      <div key={tab.id} className="text-center">
-                        <div className="mb-2 h-2 rounded-full bg-gray-200">
-                          <div
-                            className={`h-full ${tab.color} rounded-full`}
-                            style={{ width: `${tab.score}%` }}
-                          ></div>
-                        </div>
-                        <span className="break-words text-xs text-gray-600">
-                          {tab.label}
-                        </span>
-                      </div>
-                    ))}
+                {/* Viral Critique Applying Indicator */}
+                {applyingViralCritiqueKey && (
+                  <div className="border-b border-gray-200 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="animate-spin h-4 w-4 border border-teal-400 border-t-transparent rounded-full"></div>
+                      <span className="text-sm text-gray-600">Applying suggestion...</span>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Suggestions list */}
-                <div className="flex-1 overflow-y-auto min-h-0">
+                {/* Viral Critique Suggestions */}
+                {viralCritique && Object.keys(viralCritique).length > 0 && (
+                  <div className="space-y-0 border-b border-gray-200">
+                    {(() => {
+                      const allEntries = Object.entries(viralCritique)
+                      const filteredEntries = allEntries.filter(([key, value]) => {
+                        const contentHash = hashViralCritiqueContent(key, value)
+                        const isDismissed = appliedViralCritiques.has(contentHash)
+                        return !isDismissed
+                      })
+                      
+                      return filteredEntries.map(([key, value]) => {
+                        const style = getCritiqueTypeStyle(key)
+                        const contentHash = hashViralCritiqueContent(key, value)
+                        return (
+                          <div key={key} className="border-b border-gray-100 last:border-b-0">
+                            <div className="p-4 hover:bg-gray-50">
+                              <div className="flex items-start gap-3">
+                                <div className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${style.bg}`}>
+                                  <div className={`size-2 rounded-full ${style.dot}`}></div>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-1 break-words text-sm font-medium text-gray-900">
+                                    {style.label}
+                                  </div>
+                                  <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+                                    <span 
+                                      className="break-words"
+                                      dangerouslySetInnerHTML={{ __html: value }}
+                                    />
+                                    <Info className="size-3 shrink-0" />
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      className="bg-teal-600 hover:bg-teal-700"
+                                      onClick={() => handleViralCritiqueApply(key, value)}
+                                      disabled={applyingViralCritiqueKey !== null}
+                                    >
+                                      {applyingViralCritiqueKey === key ? "Applying..." : "Apply"}
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => {
+                                        const contentHash = hashViralCritiqueContent(key, value)
+                                        // Add the content hash to appliedViralCritiques to prevent this specific suggestion from appearing again
+                                        setAppliedViralCritiques(prev => new Set([...prev, contentHash]))
+                                        toast({
+                                          title: "Suggestion Dismissed",
+                                          description: "This specific suggestion has been dismissed and won't appear again.",
+                                          duration: 3000
+                                        })
+                                      }}
+                                      disabled={applyingViralCritiqueKey !== null}
+                                    >
+                                      Dismiss
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                )}
+
+                {/* Grammar & Spelling Suggestions */}
+                <div className="flex-1 min-h-0 spelling-and-grammar-suggestions">
                   {suggestions.length === 0 ? (
                     <div className="flex items-center justify-center p-8">
                       <div className="text-center">
-                        <div className="mb-2 text-gray-500">No suggestions found</div>
-                        <div className="text-sm text-gray-400">Start typing to get grammar and spelling suggestions</div>
+                        <div className="mb-2 text-gray-500">No spelling or grammar suggestions found</div>
+                        <div className="text-sm text-gray-400">Start typing to get spelling and grammar suggestions</div>
                       </div>
                     </div>
                   ) : (
                     suggestions.map(suggestion => {
                       // Handle both spelling and grammar suggestions now
-                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-blue-100';
-                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-blue-500';
+                      const suggestionTypeColor = suggestion.suggestionType === 'spelling' ? 'bg-red-100' : 'bg-yellow-100';
+                      const suggestionDotColor = suggestion.suggestionType === 'spelling' ? 'bg-red-500' : 'bg-yellow-500';
                       const suggestionLabel = suggestion.suggestionType === 'spelling' ? 'Spelling' : 'Grammar';
                       
                       return (
@@ -1068,9 +1435,10 @@ export default function GrammarlyEditor() {
                                   </div>
                                 )}
                                 <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
-                                  <span className="break-words">
-                                    {suggestion.explanation || 'Click to see details'}
-                                  </span>
+                                  <span 
+                                    className="break-words"
+                                    dangerouslySetInnerHTML={{ __html: suggestion.explanation || 'Click to see details' }}
+                                  />
                                   <Info className="size-3 shrink-0" />
                                 </div>
                                 {suggestion.confidence && (
@@ -1087,7 +1455,7 @@ export default function GrammarlyEditor() {
                                       handleSuggestionAccept(suggestion);
                                     }}
                                   >
-                                    Accept
+                                    Apply
                                   </Button>
                                   <Button 
                                     size="sm" 
@@ -1114,12 +1482,28 @@ export default function GrammarlyEditor() {
             {activeMainTab === "smart-revise" && (
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="space-y-6">
+                  {/* Quick Action Loading Indicator */}
+                  {applyingViralCritiqueKey && (
+                    <div className="rounded-lg bg-blue-50 p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="animate-spin h-4 w-4 border border-blue-400 border-t-transparent rounded-full"></div>
+                        <span className="text-sm text-blue-700">
+                          {applyingViralCritiqueKey === 'shortenScript' && "Shortening script..."}
+                          {applyingViralCritiqueKey === 'addViralHook' && "Adding viral hook..."}
+                          {applyingViralCritiqueKey === 'rewriteConversational' && "Making conversational..."}
+                          {applyingViralCritiqueKey === 'addOnscreenText' && "Adding onscreen text..."}
+                          {applyingViralCritiqueKey === 'addDeliveryTips' && "Adding delivery tips..."}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="text-center">
                     <h3 className="mb-2 font-medium text-gray-900">
-                      Smart Revise
+                      Quick Actions
                     </h3>
                     <p className="break-words text-sm text-gray-500">
-                      Revise your script with our smart actions to maximize
+                      Revise your script with AI to maximize
                       views, comments, shares, and virality.
                     </p>
                   </div>
@@ -1128,11 +1512,37 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Shorten script")}
+                      onClick={() => handleQuickAction('addViralHook')}
+                      disabled={applyingViralCritiqueKey !== null}
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">⚓ Add a viral hook</span>
+                      </div>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="h-auto w-full justify-start px-4 py-3 text-left"
+                      onClick={() => handleQuickAction('addOnscreenText')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Shorten script to under 30 seconds
+                        📖 Add suggestions for onscreen text
+                        </span>
+                      </div>
+                    </Button>
+
+
+                    <Button
+                      variant="outline"
+                      className="h-auto w-full justify-start px-4 py-3 text-left"
+                      onClick={() => handleQuickAction('shortenScript')}
+                      disabled={applyingViralCritiqueKey !== null}
+                    >
+                      <div className="flex flex-col items-start">
+                        <span className="font-medium">
+                          ⏱️ Shorten script to under 30 seconds
                         </span>
                       </div>
                     </Button>
@@ -1140,21 +1550,12 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Write viral hook")}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">Write a viral hook</span>
-                      </div>
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Rewrite conversational")}
+                      onClick={() => handleQuickAction('addDeliveryTips')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Rewrite to be more conversational
+                          🎤 Add tips for verbal delivery
                         </span>
                       </div>
                     </Button>
@@ -1162,23 +1563,12 @@ export default function GrammarlyEditor() {
                     <Button
                       variant="outline"
                       className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Add onscreen text")}
+                      onClick={() => handleQuickAction('rewriteConversational')}
+                      disabled={applyingViralCritiqueKey !== null}
                     >
                       <div className="flex flex-col items-start">
                         <span className="font-medium">
-                          Add suggestions for onscreen text
-                        </span>
-                      </div>
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      className="h-auto w-full justify-start px-4 py-3 text-left"
-                      onClick={() => console.log("Add delivery tips")}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">
-                          Add tips for verbal delivery
+                          💬 Rewrite to be more conversational
                         </span>
                       </div>
                     </Button>
@@ -1188,21 +1578,40 @@ export default function GrammarlyEditor() {
             )}
 
             {activeMainTab === "ai-write" && (
-              <div className="flex flex-1 flex-col">
+              <div className="flex flex-1 flex-col overflow-y-scroll">
                 {/* Chat messages area */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <div className="flex h-full items-center justify-center text-gray-500">
-                    <div className="max-w-full px-4 text-center">
-                      <Sparkles className="mx-auto mb-4 size-12 text-gray-300" />
-                      <h3 className="mb-2 font-medium text-gray-900">
-                        What do you want to do?
-                      </h3>
-                      <p className="break-words text-sm text-gray-500">
-                        Start a conversation to get AI assistance with your
-                        writing
-                      </p>
+                  {aiResponse ? (
+                    <div className="space-y-4">
+                      <div className="rounded-lg bg-gray-100 p-3">
+                        <div className="text-sm font-medium text-gray-900 mb-2">Your request:</div>
+                        <div className="text-sm text-gray-700">{aiChatInput}</div>
+                      </div>
+                      <div className="rounded-lg bg-teal-50 p-3">
+                        <div className="text-sm font-medium text-teal-900 mb-2">AI Generated Script:</div>
+                        <div className="text-sm text-teal-800 whitespace-pre-wrap">{aiResponse}</div>
+                      </div>
                     </div>
-                  </div>
+                  ) : isAiLoading ? (
+                    <div className="flex h-full items-center justify-center text-gray-500">
+                      <div className="max-w-full px-4 text-center">
+                        <div className="animate-spin h-8 w-8 border border-teal-400 border-t-transparent rounded-full mx-auto mb-4"></div>
+                        <p className="text-sm text-gray-600">Generating your viral script...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-gray-500">
+                      <div className="max-w-full px-4 text-center">
+                        <Sparkles className="mx-auto mb-4 size-12 text-gray-300" />
+                        <h3 className="mb-2 font-medium text-gray-900">
+                          What video topic would you like ViralVision to write a script for?
+                        </h3>
+                        <p className="break-words text-sm text-gray-500">
+                          Describe your video idea and we'll generate a viral script for you
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Chat input area */}
@@ -1211,45 +1620,40 @@ export default function GrammarlyEditor() {
                     <textarea
                       value={aiChatInput}
                       onChange={e => setAiChatInput(e.target.value)}
-                      placeholder="Ask for any revision"
+                      placeholder="What's your video about?"
                       className="min-w-0 flex-1 resize-none rounded-lg border border-gray-200 p-3 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-teal-500"
                       rows={3}
+                      disabled={isAiLoading}
                       onKeyDown={e => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault()
-                          if (aiChatInput.trim()) {
-                            // Handle send message here
-                            console.log("Send message:", aiChatInput)
-                            setAiChatInput("")
-                          }
+                          handleAiMessageSend()
                         }
                       }}
                     />
                     <Button
                       size="icon"
-                      disabled={!aiChatInput.trim()}
+                      disabled={!aiChatInput.trim() || isAiLoading}
                       className="shrink-0 self-end bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300"
-                      onClick={() => {
-                        if (aiChatInput.trim()) {
-                          // Handle send message here
-                          console.log("Send message:", aiChatInput)
-                          setAiChatInput("")
-                        }
-                      }}
+                      onClick={handleAiMessageSend}
                     >
-                      <svg
-                        className="size-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                        />
-                      </svg>
+                      {isAiLoading ? (
+                        <div className="animate-spin h-4 w-4 border border-white border-t-transparent rounded-full"></div>
+                      ) : (
+                        <svg
+                          className="size-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                          />
+                        </svg>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -1267,6 +1671,11 @@ export default function GrammarlyEditor() {
         open={performanceModalOpen}
         onOpenChange={setPerformanceModalOpen}
         documentContent={documentContent}
+      />
+      <ImportTikTokModal
+        open={tiktokModalOpen}
+        onOpenChange={setTiktokModalOpen}
+        onContentImport={handleTikTokContentImport}
       />
 
       {/* Suggestion Panel */}

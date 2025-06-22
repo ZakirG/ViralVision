@@ -38,7 +38,7 @@ export function SuggestionPanel({
       
       if (result.isSuccess) {
         toast({
-          title: "Suggestion Accepted",
+          title: "Suggestion Applied",
           description: "The suggestion has been applied to your text."
         })
         onAccept(suggestion)
@@ -82,7 +82,7 @@ export function SuggestionPanel({
       case 'spelling':
         return <AlertTriangle className="size-4 text-red-500" />
       case 'grammar':
-        return <BookOpen className="size-4 text-blue-500" />
+        return <BookOpen className="size-4 text-yellow-500" />
       default:
         return <AlertTriangle className="size-4 text-gray-500" />
     }
@@ -103,9 +103,9 @@ export function SuggestionPanel({
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-80 bg-white shadow-xl border-l border-gray-200">
-      <Card className="h-full rounded-none border-0">
-        <CardHeader className="border-b border-gray-200 pb-4">
-          <div className="flex items-center justify-between">
+      <Card className="h-full rounded-none border-0" >
+        <CardHeader className="border-b border-gray-200 pb-4" >
+          <div className="flex items-center justify-between" >
             <div className="flex items-center gap-2">
               {getSuggestionIcon()}
               <CardTitle className="text-lg">
@@ -176,11 +176,11 @@ export function SuggestionPanel({
               className="flex-1 bg-teal-600 hover:bg-teal-700"
             >
               {accepting ? (
-                "Accepting..."
+                "Applying..."
               ) : (
                 <>
                   <Check className="size-4 mr-2" />
-                  Accept
+                  Apply
                 </>
               )}
             </Button>

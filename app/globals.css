@@ -24,6 +24,139 @@ body {
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
   }
+
+  /* Custom primary color utilities */
+  .bg-primary-brand {
+    background-color: hsl(var(--primary-brand));
+  }
+  
+  .bg-primary-brand-hover {
+    background-color: hsl(var(--primary-brand-hover));
+  }
+  
+  .text-primary-brand {
+    color: hsl(var(--primary-brand));
+  }
+  
+  .text-primary-brand-hover {
+    color: hsl(var(--primary-brand-hover));
+  }
+  
+  .border-primary-brand {
+    border-color: hsl(var(--primary-brand));
+  }
+  
+  .ring-primary-brand {
+    --tw-ring-color: hsl(var(--primary-brand));
+  }
+  
+  .bg-primary-brand-light {
+    background-color: hsl(var(--primary-brand-light));
+  }
+  
+  .text-primary-brand-light {
+    color: hsl(var(--primary-brand-light));
+  }
+  
+  .bg-primary-brand-dark {
+    background-color: hsl(var(--primary-brand-dark));
+  }
+  
+  .text-primary-brand-dark {
+    color: hsl(var(--primary-brand-dark));
+  }
+  
+  /* Standardized logo styling */
+  .logo-standard {
+    width: 83px;
+    
+    border-radius: 0.5rem;
+    object-fit: contain;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .logo-standard-small {
+    width: 83px;
+    
+    border-radius: 0.5rem;
+    object-fit: contain;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Gradient utilities */
+  .bg-gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--primary-brand)) 0%, hsl(var(--primary-brand-hover)) 100%);
+  }
+  
+  .bg-gradient-primary-radial {
+    background: radial-gradient(circle, hsl(var(--primary-brand)) 0%, hsl(var(--primary-brand-hover)) 100%);
+  }
+  
+  .bg-gradient-primary-to-transparent {
+    background: linear-gradient(135deg, hsl(var(--primary-brand)) 0%, transparent 100%);
+  }
+  
+  /* Suggestion highlighting styles */
+  .suggestion-highlight {
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  /* Spelling suggestion styles - thick red underline */
+  .suggestion-highlight[data-spelling-suggestion-id] {
+    border-bottom: 3px solid #dc2626;
+    border-bottom-style: solid;
+    border-bottom-width: 3px;
+    border-bottom-color: #dc2626;
+  }
+  
+  .suggestion-highlight[data-spelling-suggestion-id]:hover {
+    border-bottom-color: #b91c1c;
+  }
+  
+  /* Grammar suggestion styles - yellow background */
+  .suggestion-highlight[data-grammar-suggestion-id] {
+    background-color: rgba(255, 255, 0, 0.3);
+    border-radius: 2px;
+    padding: 1px 2px;
+  }
+  
+  .suggestion-highlight[data-grammar-suggestion-id]:hover {
+    background-color: rgba(255, 255, 0, 0.5);
+  }
+  
+  /* Combined spelling and grammar suggestions */
+  .suggestion-highlight[data-spelling-suggestion-id][data-grammar-suggestion-id] {
+    background-color: rgba(255, 255, 0, 0.3);
+    border-radius: 2px;
+    padding: 1px 2px;
+    border-bottom: 3px solid #dc2626;
+  }
+  
+  .suggestion-highlight[data-spelling-suggestion-id][data-grammar-suggestion-id]:hover {
+    background-color: rgba(255, 255, 0, 0.5);
+    border-bottom-color: #b91c1c;
+  }
+  
+  /* Other suggestion types - pink background */
+  .suggestion-highlight[data-suggestion-id]:not([data-spelling-suggestion-id]):not([data-grammar-suggestion-id]) {
+    background-color: #fce7f3;
+    border-radius: 2px;
+    padding: 1px 2px;
+  }
+  
+  .suggestion-highlight[data-suggestion-id]:not([data-spelling-suggestion-id]):not([data-grammar-suggestion-id]):hover {
+    background-color: #fbb6ce;
+  }
 }
 
 @layer base {
@@ -61,6 +194,12 @@ body {
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    
+    /* Custom primary brand colors - based on #780000 (deep red) */
+    --primary-brand: 0 100% 24%;        /* #780000 - Main brand color */
+    --primary-brand-hover: 0 100% 20%;  /* #660000 - Darker for hover */
+    --primary-brand-light: 0 100% 95%;  /* #FFF5F5 - Very light red */
+    --primary-brand-dark: 0 100% 15%;   /* #4D0000 - Darker red */
   }
   .dark {
     --background: 0 0% 3.9%;
@@ -95,6 +234,12 @@ body {
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    
+    /* Dark mode primary brand colors - based on #780000 */
+    --primary-brand: 0 100% 30%;        /* #990000 - Slightly lighter for dark mode */
+    --primary-brand-hover: 0 100% 25%;  /* #800000 - Darker red for hover in dark mode */
+    --primary-brand-light: 0 100% 90%;  /* #FFE6E6 - Lighter red for dark mode */
+    --primary-brand-dark: 0 100% 20%;   /* #660000 - Darker red for dark mode */
   }
 }
 

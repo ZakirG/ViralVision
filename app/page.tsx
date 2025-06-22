@@ -22,7 +22,10 @@ import {
   CheckCircle,
   ArrowRight,
   Play,
-  Pause
+  Pause,
+  Users,
+  TrendingUp,
+  Zap
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs"
@@ -33,6 +36,8 @@ import {
 } from "@/actions/db/documents-actions"
 import type { Document } from "@/db/schema"
 import { toast } from "@/hooks/use-toast"
+import Link from "next/link"
+import Image from "next/image"
 
 export default function HomePage() {
   const { isSignedIn, user, isLoaded } = useUser()
@@ -50,8 +55,12 @@ export default function HomePage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex size-8 items-center justify-center rounded-full bg-teal-600">
-            <span className="text-sm font-bold text-white">W</span>
+          <div className="mx-auto mb-4 flex size-12 items-center justify-center">
+            <img 
+              src="/logo.png" 
+              alt="ViralVision Logo" 
+              className="logo-standard"
+            />
           </div>
           <p className="text-gray-600">Loading...</p>
         </div>
@@ -69,12 +78,11 @@ export default function HomePage() {
             <div className="flex items-center justify-between py-4">
               {/* Logo */}
               <div className="flex items-center gap-2">
-                <div className="flex size-8 items-center justify-center rounded-full bg-teal-600">
-                  <span className="text-sm font-bold text-white">W</span>
-                </div>
-                <span className="text-xl font-bold text-gray-900">
-                  WordWise
-                </span>
+                <img 
+                  src="/logo.png" 
+                  alt="ViralVision Logo" 
+                  className="logo-standard"
+                />
               </div>
 
               {/* Navigation */}
@@ -83,7 +91,7 @@ export default function HomePage() {
                   href="#features"
                   className="text-gray-600 hover:text-gray-900"
                 >
-                  Product
+                  Features
                 </a>
                 <a
                   href="#pricing"
@@ -108,8 +116,8 @@ export default function HomePage() {
                   <Button variant="ghost">Log in</Button>
                 </SignInButton>
                 <SignInButton mode="modal">
-                  <Button className="bg-teal-600 hover:bg-teal-700">
-                    Get WordWise - It's free
+                  <Button className="bg-primary-brand hover:bg-primary-brand-hover">
+                    Start Creating - It's free
                   </Button>
                 </SignInButton>
               </div>
@@ -125,26 +133,48 @@ export default function HomePage() {
               <div className="space-y-8">
                 <div className="space-y-4">
                   <h1 className="text-5xl font-bold leading-tight text-gray-900">
-                    Intelligent AI that
+                    Create videos that
                     <br />
-                    elevates your writing
+                    <span className="text-primary-brand">go viral</span> with
                     <br />
-                    and enhances clarity
+                    AI-powered scripts
                   </h1>
                   <p className="text-xl leading-relaxed text-gray-600">
-                    Work with an AI writing partner that helps you find the
-                    perfect words—to craft that important email, make your point
-                    clear, and keep your ideas flowing.
+                    Transform your short-form videos into viral sensations. Get more views, 
+                    engagement, and shares with AI that writes hooks that grab attention in 
+                    the first 3 seconds and scripts that keep viewers watching.
                   </p>
+                  
+                  {/* Platform Logos */}
+                  <div className="flex items-center gap-4 pt-2">
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/>
+                      </svg>
+                      <span className="text-sm font-medium">TikTok</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                      </svg>
+                      <span className="text-sm font-medium">Instagram Reels</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                      </svg>
+                      <span className="text-sm font-medium">YouTube Shorts</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-4 sm:flex-row">
                   <SignInButton mode="modal">
                     <Button
                       size="lg"
-                      className="bg-teal-600 px-8 py-3 text-lg hover:bg-teal-700"
+                      className="bg-primary-brand px-8 py-3 text-lg hover:bg-primary-brand-hover"
                     >
-                      Sign up - It's free
+                      Start Creating - It's free
                       <ArrowRight className="ml-2 size-5" />
                     </Button>
                   </SignInButton>
@@ -179,11 +209,11 @@ export default function HomePage() {
 
                 <p className="text-sm text-gray-500">
                   By signing up, you agree to the{" "}
-                  <a href="#" className="text-teal-600 hover:underline">
+                  <a href="#" className="text-primary-brand hover:underline">
                     Terms and Conditions
                   </a>{" "}
                   and{" "}
-                  <a href="#" className="text-teal-600 hover:underline">
+                  <a href="#" className="text-primary-brand hover:underline">
                     Privacy Policy
                   </a>
                   .
@@ -196,32 +226,30 @@ export default function HomePage() {
                   <CardContent className="p-6">
                     <div className="space-y-4">
                       <div className="flex items-center gap-2 text-sm text-gray-500">
-                        <div className="size-2 rounded-full bg-teal-600"></div>
-                        <span>WordWise is reviewing your text...</span>
+                        <div className="size-2 rounded-full bg-primary-brand"></div>
+                        <span>ViralVision is optimizing your script...</span>
                       </div>
 
                       <div className="rounded-lg bg-gray-50 p-4">
                         <p className="leading-relaxed text-gray-800">
-                          We're ready to move forward with the project plan once
-                          you take a look at the draft.{" "}
-                          <span className="rounded bg-blue-100 px-1 text-blue-800">
-                            Can you review the plan by Friday?
-                          </span>
+                          <span className="font-semibold text-primary-brand">[HOOK]</span>{" "}
+                          "What if I told you that 73% of people scroll past videos in the first 3 seconds? 
+                          But this one trick will make them stop dead in their tracks..."
                         </p>
                       </div>
 
-                      <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+                      <div className="rounded-lg border border-primary-brand bg-primary-brand-light p-4">
                         <div className="flex items-start gap-3">
-                          <CheckCircle className="mt-0.5 size-5 text-teal-600" />
+                          <CheckCircle className="mt-0.5 size-5 text-primary-brand" />
                           <div>
-                            <p className="font-medium text-teal-900">
-                              Specify a deadline
+                            <p className="font-medium text-primary-brand">
+                              Viral Hook Added
                             </p>
-                            <p className="text-sm text-teal-700">
-                              to review the plan.
+                            <p className="text-sm text-primary-brand-light">
+                              Grabs attention in first 3 seconds with curiosity gap
                             </p>
-                            <button className="mt-1 text-sm font-medium text-teal-600 hover:text-teal-800">
-                              Show this change →
+                            <button className="mt-1 text-sm font-medium text-primary-brand hover:text-primary-brand-hover">
+                              Apply this change →
                             </button>
                           </div>
                         </div>
@@ -230,31 +258,15 @@ export default function HomePage() {
                   </CardContent>
                 </Card>
 
-                {/* Floating WordWise logo */}
-                <div className="absolute -bottom-4 -right-4 flex size-12 items-center justify-center rounded-full bg-teal-600 shadow-lg">
-                  <span className="text-lg font-bold text-white">W</span>
+                {/* Floating ViralVision logo */}
+                <div className="absolute -bottom-4 -right-4 flex size-20 items-center justify-center rounded-full bg-white shadow-lg">
+                  <img 
+                    src="/logo.png" 
+                    alt="ViralVision Logo" 
+                    className="logo-standard"
+                  />
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Trust Section */}
-        <section className="bg-gray-50 py-16">
-          <div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
-            <p className="mb-12 text-gray-600">
-              Trusted by professionals and teams worldwide
-            </p>
-            <div className="grid grid-cols-2 items-center gap-8 opacity-60 md:grid-cols-4 lg:grid-cols-6">
-              {/* Placeholder company logos */}
-              {[1, 2, 3, 4, 5, 6].map(i => (
-                <div
-                  key={i}
-                  className="flex h-12 items-center justify-center rounded bg-gray-300"
-                >
-                  <span className="font-medium text-gray-500">Company {i}</span>
-                </div>
-              ))}
             </div>
           </div>
         </section>
@@ -264,56 +276,56 @@ export default function HomePage() {
           <div className="mx-auto max-w-7xl">
             <div className="mb-16 text-center">
               <h2 className="mb-4 text-4xl font-bold text-gray-900">
-                Write with confidence
+                Everything you need to create viral videos
               </h2>
               <p className="mx-auto max-w-3xl text-xl text-gray-600">
-                WordWise helps you communicate clearly and effectively with
-                AI-powered writing assistance
+                ViralVision helps short-form video creators maximize engagement, views, 
+                and shares with AI-powered script optimization
               </p>
             </div>
 
             <div className="grid gap-8 md:grid-cols-3">
               <Card className="border-0 shadow-lg">
                 <CardContent className="p-8 text-center">
-                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-teal-100">
-                    <CheckCircle className="size-6 text-teal-600" />
+                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-primary-brand-light">
+                    <Zap className="size-6 text-primary-brand" />
                   </div>
                   <h3 className="mb-3 text-xl font-semibold">
-                    Grammar & Spelling
+                    Viral Hooks
                   </h3>
                   <p className="text-gray-600">
-                    Catch errors and improve your writing with advanced grammar
-                    and spell checking
+                    Generate attention-grabbing hooks that stop viewers from scrolling 
+                    in the first 3 seconds
                   </p>
                 </CardContent>
               </Card>
 
               <Card className="border-0 shadow-lg">
                 <CardContent className="p-8 text-center">
-                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-blue-100">
-                    <Star className="size-6 text-blue-600" />
+                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-primary-brand-light">
+                    <Star className="size-6 text-primary-brand" />
                   </div>
                   <h3 className="mb-3 text-xl font-semibold">
-                    Style & Clarity
+                    On-Screen Text
                   </h3>
                   <p className="text-gray-600">
-                    Enhance your writing style and make your message clear and
-                    engaging
+                    Get suggestions for compelling on-screen text that enhances your 
+                    spoken script and increases engagement
                   </p>
                 </CardContent>
               </Card>
 
               <Card className="border-0 shadow-lg">
                 <CardContent className="p-8 text-center">
-                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-purple-100">
-                    <User className="size-6 text-purple-600" />
+                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg bg-primary-brand-light">
+                    <Users className="size-6 text-primary-brand" />
                   </div>
                   <h3 className="mb-3 text-xl font-semibold">
-                    Personal Assistant
+                    Delivery Tips
                   </h3>
                   <p className="text-gray-600">
-                    Get personalized suggestions that match your writing style
-                    and goals
+                    Receive pacing and delivery suggestions to make your script sound 
+                    natural and engaging when spoken aloud
                   </p>
                 </CardContent>
               </Card>
@@ -322,21 +334,21 @@ export default function HomePage() {
         </section>
 
         {/* CTA Section */}
-        <section className="bg-teal-600 py-20">
+        <section className="bg-primary-brand py-20">
           <div className="mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
             <h2 className="mb-4 text-4xl font-bold text-white">
-              Ready to improve your writing?
+              Ready to create viral videos?
             </h2>
-            <p className="mb-8 text-xl text-teal-100">
-              Join thousands of writers who trust WordWise to help them
-              communicate better
+            <p className="mb-8 text-xl text-primary-brand-light">
+              Join thousands of creators who use ViralVision to get more views, 
+              engagement, and shares on TikTok, Instagram Reels, and YouTube Shorts
             </p>
             <SignInButton mode="modal">
               <Button
                 size="lg"
-                className="bg-white px-8 py-3 text-lg text-teal-600 hover:bg-gray-100"
+                className="bg-white px-8 py-3 text-lg text-primary-brand hover:bg-gray-100"
               >
-                Get started for free
+                Start creating for free
                 <ArrowRight className="ml-2 size-5" />
               </Button>
             </SignInButton>
@@ -349,33 +361,34 @@ export default function HomePage() {
             <div className="grid gap-8 md:grid-cols-4">
               <div>
                 <div className="mb-4 flex items-center gap-2">
-                  <div className="flex size-8 items-center justify-center rounded-full bg-teal-600">
-                    <span className="text-sm font-bold text-white">W</span>
-                  </div>
-                  <span className="text-xl font-bold">WordWise</span>
+                  <img 
+                    src="/logo.png" 
+                    alt="ViralVision Logo" 
+                    className="logo-standard"
+                  />
                 </div>
                 <p className="text-gray-400">
-                  AI-powered writing assistant that helps you write better,
-                  faster, and with confidence.
+                  AI-powered scriptwriting tool that helps video content creators 
+                  create viral short-form videos with maximum engagement.
                 </p>
               </div>
 
               <div>
-                <h4 className="mb-4 font-semibold">Product</h4>
+                <h4 className="mb-4 font-semibold">Features</h4>
                 <ul className="space-y-2 text-gray-400">
                   <li>
                     <a href="#" className="hover:text-white">
-                      Features
+                      Viral Hooks
                     </a>
                   </li>
                   <li>
                     <a href="#" className="hover:text-white">
-                      Pricing
+                      On-Screen Text
                     </a>
                   </li>
                   <li>
                     <a href="#" className="hover:text-white">
-                      Enterprise
+                      Delivery Tips
                     </a>
                   </li>
                 </ul>
@@ -420,7 +433,7 @@ export default function HomePage() {
             </div>
 
             <div className="mt-8 border-t border-gray-800 pt-8 text-center text-gray-400">
-              <p>&copy; 2024 WordWise. All rights reserved.</p>
+              <p>&copy; 2024 ViralVision. All rights reserved.</p>
             </div>
           </div>
         </footer>

@@ -240,10 +240,6 @@ export default function Dashboard() {
           {/* Action buttons */}
           <div className="mb-6 flex flex-col gap-4 sm:flex-row">
             <NewDocumentModal onDocumentCreated={handleDocumentCreated} />
-            <Button variant="outline" className="gap-2">
-              <Upload className="size-4" />
-              Upload file
-            </Button>
           </div>
 
           {/* Search */}

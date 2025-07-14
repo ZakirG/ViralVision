@@ -25,7 +25,9 @@ import {
   Pause,
   Users,
   TrendingUp,
-  Zap
+  Zap,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useUser, SignInButton, UserButton } from "@clerk/nextjs"
@@ -42,6 +44,30 @@ import Image from "next/image"
 export default function HomePage() {
   const { isSignedIn, user, isLoaded } = useUser()
   const router = useRouter()
+  const [currentScreenshot, setCurrentScreenshot] = useState(0)
+
+  const screenshots = [
+    "/screenshots/screenshot-1.png",
+    "/screenshots/screenshot-2.png", 
+    "/screenshots/screenshot-3.png"
+  ]
+
+  // Auto-advance carousel every 4 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentScreenshot((prev) => (prev + 1) % screenshots.length)
+    }, 4000)
+
+    return () => clearInterval(interval)
+  }, [screenshots.length])
+
+  const nextScreenshot = () => {
+    setCurrentScreenshot((prev) => (prev + 1) % screenshots.length)
+  }
+
+  const prevScreenshot = () => {
+    setCurrentScreenshot((prev) => (prev - 1 + screenshots.length) % screenshots.length)
+  }
 
   // Redirect authenticated users to dashboard
   useEffect(() => {
@@ -174,7 +200,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-4 sm:flex-row">
+                <div className="flex flex-col gap-4 sm:flex-row relative z-10">
                   <SignInButton mode="modal">
                     <Button
                       size="lg"
@@ -226,52 +252,37 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* Right side - Demo */}
+              {/* Right side - Screenshot Carousel */}
               <div className="relative">
-                <Card className="border-0 bg-white shadow-2xl">
-                  <CardContent className="p-6">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-500">
-                        <div className="size-2 rounded-full bg-primary-brand"></div>
-                        <span>ViralVision is optimizing your script...</span>
-                      </div>
-
-                      <div className="rounded-lg bg-gray-50 p-4">
-                        <p className="leading-relaxed text-gray-800">
-                          <span className="font-semibold text-primary-brand">[HOOK]</span>{" "}
-                          "What if I told you that 73% of people scroll past videos in the first 3 seconds? 
-                          But this one trick will make them stop dead in their tracks..."
-                        </p>
-                      </div>
-
-                      <div className="rounded-lg border border-primary-brand bg-primary-brand-light p-4">
-                        <div className="flex items-start gap-3">
-                          <CheckCircle className="mt-0.5 size-5 text-primary-brand" />
-                          <div>
-                            <p className="font-medium text-primary-brand">
-                              Viral Hook Added
-                            </p>
-                            <p className="text-sm text-primary-brand-light">
-                              Grabs attention in first 3 seconds with curiosity gap
-                            </p>
-                            <button className="mt-1 text-sm font-medium text-primary-brand hover:text-primary-brand-hover">
-                              Apply this change →
-                            </button>
-                          </div>
+                <Card className="border-0 bg-white shadow-2xl rounded-lg">
+                  <CardContent className="p-0">
+                    {/* 
+                      The div holding the images is given rounded corners and overflow-hidden
+                      to create a clipping mask. This ensures that the images inside are
+                      perfectly clipped to the rounded shape, preventing any background from
+                      peeking through at the edges, which can happen with sub-pixel rendering
+                      at different screen sizes.
+                    */}
+                    <div className="relative h-96 overflow-hidden bg-white rounded-lg">
+                      {screenshots.map((screenshot, index) => (
+                        <div
+                          key={index}
+                          className={`absolute inset-0 transition-opacity duration-500 ${
+                            index === currentScreenshot ? "opacity-100" : "opacity-0"
+                          }`}
+                        >
+                          <Image
+                            src={screenshot}
+                            alt={`ViralVision Screenshot ${index + 1}`}
+                            fill
+                            className="object-cover object-left-top"
+                            priority={index === 0}
+                          />
                         </div>
-                      </div>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
-
-                {/* Floating ViralVision logo */}
-                <div className="absolute -bottom-4 -right-4 flex size-20 items-center justify-center rounded-full bg-white shadow-lg">
-                  <img 
-                    src="/logo-svg.svg" 
-                    alt="ViralVision Logo" 
-                    className="logo-standard"
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -374,8 +385,7 @@ export default function HomePage() {
                   />
                 </div>
                 <p className="text-gray-400">
-                  AI-powered scriptwriting tool that helps video content creators 
-                  create viral short-form videos with maximum engagement.
+                  Optimize viral short-form video scripts using AI.
                 </p>
               </div>
 
